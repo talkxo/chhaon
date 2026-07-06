@@ -7,6 +7,11 @@ import {
   diurnalCurve,
   heatColor,
   NO_INTERVENTIONS,
+  getNoonAC,
+  getNightAC,
+  getNoonACScore,
+  getNightACScore,
+  FloorLevel,
 } from "@/lib/model";
 import TempCurve from "./TempCurve";
 
@@ -27,6 +32,9 @@ type Props = {
   onBrief: (b: Block) => void;
   briefLoading: boolean;
   onFlyTo: (target: FlyTarget) => void;
+  viewMode: 'temp' | 'ac_noon' | 'ac_night';
+  floorLevel: FloorLevel;
+  onFloorLevelChange: (f: FloorLevel) => void;
 };
 
 // ── Nominatim geocoding ───────────────────────────────────────────────────────
@@ -56,8 +64,20 @@ async function geocode(q: string): Promise<GeoResult[]> {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
-function HeatBadge({ score, lst }: { score: number; lst: number }) {
-  const c = heatColor(score);
+function HeatBadge({ score, lst, viewMode, b, floorLevel }: { score: number; lst: number; viewMode: 'temp' | 'ac_noon' | 'ac_night'; b: Block; floorLevel: FloorLevel }) {
+  let displayScore = score;
+  let displayVal = `${lst.toFixed(1)}°C`;
+  let title = "LST";
+  if (viewMode === 'ac_noon') {
+    displayScore = getNoonACScore(b, floorLevel);
+    displayVal = `${getNoonAC(b, floorLevel)}°C`;
+    title = "AC SETPOINT";
+  } else if (viewMode === 'ac_night') {
+    displayScore = getNightACScore(b, floorLevel);
+    displayVal = `${getNightAC(b, floorLevel)}°C`;
+    title = "AC SETPOINT";
+  }
+  const c = heatColor(displayScore);
   const color = `rgb(${c.join(",")})`;
   return (
     <div
@@ -68,10 +88,10 @@ function HeatBadge({ score, lst }: { score: number; lst: number }) {
       }}
     >
       <span className="font-display text-xl font-bold leading-none" style={{ color }}>
-        {lst.toFixed(1)}°
+        {displayVal}
       </span>
-      <span className="text-[10px] font-medium" style={{ color: `rgba(${c.join(",")},0.8)` }}>
-        {Math.round(score)}/100
+      <span className="text-[9px] font-semibold tracking-wider opacity-70" style={{ color }}>
+        {title}
       </span>
     </div>
   );
@@ -102,8 +122,17 @@ function HeatBar({ score }: { score: number }) {
   );
 }
 
-function BlockRow({ b, index, onSelect }: { b: Block; index: number; onSelect: (b: Block) => void }) {
-  const c = heatColor(b.score);
+function BlockRow({ b, index, onSelect, viewMode, floorLevel }: { b: Block; index: number; onSelect: (b: Block) => void; viewMode: 'temp' | 'ac_noon' | 'ac_night'; floorLevel: FloorLevel }) {
+  let score = b.score;
+  let label = `${b.lst.toFixed(1)}°`;
+  if (viewMode === 'ac_noon') {
+    score = getNoonACScore(b, floorLevel);
+    label = `${getNoonAC(b, floorLevel)}°C`;
+  } else if (viewMode === 'ac_night') {
+    score = getNightACScore(b, floorLevel);
+    label = `${getNightAC(b, floorLevel)}°C`;
+  }
+  const c = heatColor(score);
   return (
     <motion.button
       key={b.id}
@@ -119,13 +148,13 @@ function BlockRow({ b, index, onSelect }: { b: Block; index: number; onSelect: (
       />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-xs font-medium text-white leading-tight">{b.name}</span>
-        <HeatBar score={b.score} />
+        <HeatBar score={score} />
       </span>
       <span
         className="font-display text-sm font-bold flex-none"
         style={{ color: `rgb(${c.join(",")})` }}
       >
-        {b.lst.toFixed(1)}°
+        {label}
       </span>
     </motion.button>
   );
@@ -277,8 +306,7 @@ function MapSearch({ onFlyTo, blockSearch, onBlockSearch }: {
   );
 }
 
-// ── Main Sidebar ──────────────────────────────────────────────────────────────
-export default function Sidebar({ blocks, selected, onSelect, onBrief, briefLoading, onFlyTo }: Props) {
+export default function Sidebar({ blocks, selected, onSelect, onBrief, briefLoading, onFlyTo, viewMode, floorLevel, onFloorLevelChange }: Props) {
   const [blockSearch, setBlockSearch] = useState("");
 
   // ── All blocks grouped by area, sorted by heat ───────────────────────────
@@ -344,6 +372,30 @@ export default function Sidebar({ blocks, selected, onSelect, onBrief, briefLoad
               onBlockSearch={setBlockSearch}
             />
           </div>
+
+          {/* Floor level selector segment */}
+          <div className="mt-3">
+            <div className="text-[10px] font-bold text-white/40 tracking-wider uppercase mb-1.5 px-0.5">Floor Level</div>
+            <div className="grid grid-cols-3 bg-black/40 rounded-xl p-0.5 border border-white/5">
+              {(['1-2', '3-4', '5+'] as FloorLevel[]).map((f) => {
+                const active = floorLevel === f;
+                const labels = { '1-2': '1-2 Low', '3-4': '3-4 Avg', '5+': '5+ Top' };
+                return (
+                  <button
+                    key={f}
+                    onClick={() => onFloorLevelChange(f)}
+                    className={`px-1 py-1.5 rounded-lg text-[9px] font-bold tracking-wider uppercase transition-all duration-200 cursor-pointer ${
+                      active
+                        ? "bg-white/10 text-white shadow border border-white/10"
+                        : "text-white/40 hover:text-white/70"
+                    }`}
+                  >
+                    {labels[f]}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
         </div>
 
         {/* Divider */}
@@ -376,7 +428,7 @@ export default function Sidebar({ blocks, selected, onSelect, onBrief, briefLoad
                     </p>
                   </div>
                   <div className="flex items-center gap-1.5 flex-none">
-                    <HeatBadge score={selected.score} lst={selected.lst} />
+                    <HeatBadge score={selected.score} lst={selected.lst} viewMode={viewMode} b={selected} floorLevel={floorLevel} />
                     <button
                       onClick={() => onSelect(null)}
                       className="rounded-full bg-white/10 p-1.5 text-white/50 hover:bg-white/20 hover:text-white transition"
@@ -477,6 +529,8 @@ export default function Sidebar({ blocks, selected, onSelect, onBrief, briefLoad
                                 b={b}
                                 index={baseIndex + i}
                                 onSelect={onSelect}
+                                viewMode={viewMode}
+                                floorLevel={floorLevel}
                               />
                             ))}
                           </div>

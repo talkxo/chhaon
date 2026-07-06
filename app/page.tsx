@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import { useCallback, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Block, generateBlocks } from "@/lib/model";
+import { Block, generateBlocks, FloorLevel } from "@/lib/model";
 import Sidebar, { type FlyTarget } from "@/components/BottomSheet";
 import TopBar from "@/components/TopBar";
 import AskTwin from "@/components/AskTwin";
@@ -33,6 +33,10 @@ export default function Home() {
   // Geocoded location from sidebar search → drives MapView camera
   const [flyToTarget, setFlyToTarget] = useState<FlyTarget | null>(null);
 
+  // View state layers and building floors filters
+  const [viewMode, setViewMode] = useState<"temp" | "ac_noon" | "ac_night">("temp");
+  const [floorLevel, setFloorLevel] = useState<FloorLevel>("3-4");
+
   const selected = useMemo(
     () => blocks.find((b) => b.id === selectedId) ?? null,
     [blocks, selectedId],
@@ -43,14 +47,15 @@ export default function Home() {
   }, []);
 
   const handleBrief = useCallback((b: Block) => {
+    const floorLabel = { "1-2": "1st-2nd floor (shaded level)", "3-4": "3rd-4th floor (mid level)", "5+": "5th+ top floor (roof solar radiation exposure)" }[floorLevel];
     setSeed([
       {
         role: "user",
-        content: `Write a full intervention brief for ${b.name}. Cover: why this block runs hot (density ${Math.round(b.density * 100)}%, NDVI ${b.ndvi.toFixed(2)}, albedo ${b.albedo.toFixed(2)}, canopy ${Math.round(b.canopy * 100)}%), the recommended intervention mix with expected °C relief, rough cost in Indian Rupees, and what to verify on the ground before committing budget.`,
+        content: `Write a full intervention brief for ${b.name}. Cover: why this block runs hot (density ${Math.round(b.density * 100)}%, NDVI ${b.ndvi.toFixed(2)}, albedo ${b.albedo.toFixed(2)}, canopy ${Math.round(b.canopy * 100)}%), calculations for ${floorLabel}, the recommended indoor AC setpoint & intervention mix with expected relief in Indian conditions, rough cost, and what to verify on the ground.`,
       },
     ]);
     setAskOpen(true);
-  }, []);
+  }, [floorLevel]);
 
   const handleFlyTo = useCallback((target: FlyTarget) => {
     setFlyToTarget({ ...target, _ts: Date.now() } as FlyTarget & { _ts: number });
@@ -64,6 +69,8 @@ export default function Home() {
         selectedId={selectedId}
         flyToTarget={flyToTarget}
         onSelect={handleSelect}
+        viewMode={viewMode}
+        floorLevel={floorLevel}
       />
 
       {/* Sidebar — left panel, 320 px */}
@@ -74,10 +81,18 @@ export default function Home() {
         onBrief={handleBrief}
         briefLoading={false}
         onFlyTo={handleFlyTo}
+        viewMode={viewMode}
+        floorLevel={floorLevel}
+        onFloorLevelChange={setFloorLevel}
       />
 
       {/* TopBar — floats top-right, leaves sidebar gap */}
-      <TopBar blocks={blocks} onAsk={() => { setSeed(null); setAskOpen(true); }} />
+      <TopBar 
+        blocks={blocks} 
+        onAsk={() => { setSeed(null); setAskOpen(true); }}
+        viewMode={viewMode}
+        onViewModeChange={setViewMode}
+      />
 
       <AskTwin
         open={askOpen}

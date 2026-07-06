@@ -6,7 +6,7 @@ import { PolygonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { FlyToInterpolator, type MapViewState, type PickingInfo } from "@deck.gl/core";
 import { Map } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Block, heatColor, scoreFromLST } from "@/lib/model";
+import { Block, heatColor, scoreFromLST, getNoonACScore, getNightACScore, FloorLevel } from "@/lib/model";
 import type { FlyTarget } from "./BottomSheet";
 
 // Dark basemap WITH labels so streets and locality names are visible
@@ -29,9 +29,11 @@ type Props = {
   selectedId: string | null;
   onSelect: (block: Block | null) => void;
   flyToTarget: FlyTarget | null;
+  viewMode: 'temp' | 'ac_noon' | 'ac_night';
+  floorLevel: FloorLevel;
 };
 
-export default function MapView({ blocks, selectedId, onSelect, flyToTarget }: Props) {
+export default function MapView({ blocks, selectedId, onSelect, flyToTarget, viewMode, floorLevel }: Props) {
   const [viewState, setViewState] = useState<MapViewState>(INITIAL_VIEW);
   const [hovered, setHovered] = useState<string | null>(null);
   const [userLocation, setUserLocation] = useState<UserLocation>(null);
@@ -98,7 +100,11 @@ export default function MapView({ blocks, selectedId, onSelect, flyToTarget }: P
         getPolygon: (b) => b.polygon,
         extruded: false,
         getFillColor: (b) => {
-          const c = heatColor(scoreFromLST(b.lst));
+          let score = scoreFromLST(b.lst);
+          if (viewMode === 'ac_noon') score = getNoonACScore(b, floorLevel);
+          if (viewMode === 'ac_night') score = getNightACScore(b, floorLevel);
+          
+          const c = heatColor(score);
           const alpha =
             selectedId
               ? b.id === selectedId
@@ -118,7 +124,7 @@ export default function MapView({ blocks, selectedId, onSelect, flyToTarget }: P
         stroked: true,
         pickable: true,
         updateTriggers: {
-          getFillColor: [selectedId, hovered],
+          getFillColor: [selectedId, hovered, viewMode, floorLevel],
           getLineColor: [selectedId],
           getLineWidth: [selectedId],
         },

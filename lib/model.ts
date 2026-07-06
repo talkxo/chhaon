@@ -262,3 +262,40 @@ export function cityStats(blocks: Block[]) {
 export function priorityBlocks(blocks: Block[], n = 8) {
   return [...blocks].sort((a, b) => b.lst - a.lst).slice(0, n);
 }
+
+// ---- Recommended AC settings (BEE India-aligned energy saving logic) ----
+export type FloorLevel = '1-2' | '3-4' | '5+';
+
+export function getFloorOffset(floor: FloorLevel): number {
+  if (floor === '1-2') return -1.2; // shaded ground/lower levels (naturally cooler)
+  if (floor === '5+') return 1.8;   // top/roof floors under direct solar gain (hotter)
+  return 0.0;                       // mid level 3-4 (baseline average)
+}
+
+export function getNoonAC(b: Block, floor: FloorLevel = '3-4'): number {
+  const adjusted = b.lst + getFloorOffset(floor);
+  if (adjusted >= 43.5) return 26;
+  if (adjusted >= 38.5) return 25;
+  return 24;
+}
+
+export function getNightAC(b: Block, floor: FloorLevel = '3-4'): number {
+  const adjusted = b.lst + getFloorOffset(floor);
+  if (adjusted >= 42.5) return 27;
+  if (adjusted >= 37.5) return 26;
+  return 25;
+}
+
+export function getNoonACScore(b: Block, floor: FloorLevel = '3-4'): number {
+  const ac = getNoonAC(b, floor);
+  if (ac === 26) return 100; // Red (High load)
+  if (ac === 25) return 50;  // Yellow (Moderate load)
+  return 0;                  // Green (Eco/Comfort)
+}
+
+export function getNightACScore(b: Block, floor: FloorLevel = '3-4'): number {
+  const ac = getNightAC(b, floor);
+  if (ac === 27) return 100; // Red (High sleeping load)
+  if (ac === 26) return 50;  // Yellow (Moderate sleeping load)
+  return 0;                  // Green (Eco sleeping load)
+}
