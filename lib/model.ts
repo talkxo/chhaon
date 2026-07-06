@@ -267,35 +267,50 @@ export function priorityBlocks(blocks: Block[], n = 8) {
 export type FloorLevel = '1-2' | '3-4' | '5+';
 
 export function getFloorOffset(floor: FloorLevel): number {
-  if (floor === '1-2') return -1.2; // shaded ground/lower levels (naturally cooler)
-  if (floor === '5+') return 1.8;   // top/roof floors under direct solar gain (hotter)
-  return 0.0;                       // mid level 3-4 (baseline average)
+  if (floor === '1-2') return -1.2;
+  if (floor === '5+') return 1.8;
+  return 0.0;
 }
 
 export function getNoonAC(b: Block, floor: FloorLevel = '3-4'): number {
-  const adjusted = b.lst + getFloorOffset(floor);
-  if (adjusted >= 43.5) return 26;
-  if (adjusted >= 38.5) return 25;
-  return 24;
+  let base = 24;
+  if (floor === '1-2') base = 23;
+  if (floor === '5+') base = 25;
+
+  // Add load adjustments for hot blocks
+  if (b.lst >= 42.0) {
+    base += (floor === '5+') ? 2 : 1;
+  }
+  return base;
 }
 
 export function getNightAC(b: Block, floor: FloorLevel = '3-4'): number {
-  const adjusted = b.lst + getFloorOffset(floor);
-  if (adjusted >= 42.5) return 27;
-  if (adjusted >= 37.5) return 26;
-  return 25;
+  let base = 25;
+  if (floor === '1-2') base = 24;
+  if (floor === '5+') base = 26;
+
+  // Adjust for heat islands holding warmth at night
+  if (b.lst >= 41.0) {
+    base += 1;
+  }
+  return base;
 }
 
 export function getNoonACScore(b: Block, floor: FloorLevel = '3-4'): number {
   const ac = getNoonAC(b, floor);
-  if (ac === 26) return 100; // Red (High load)
-  if (ac === 25) return 50;  // Yellow (Moderate load)
-  return 0;                  // Green (Eco/Comfort)
+  // Map scores: 27°C (high load/hot block) -> 100, 26°C -> 75, 25°C -> 50, 24°C -> 25, 23°C -> 0
+  if (ac >= 27) return 100;
+  if (ac === 26) return 75;
+  if (ac === 25) return 50;
+  if (ac === 24) return 25;
+  return 0;
 }
 
 export function getNightACScore(b: Block, floor: FloorLevel = '3-4'): number {
   const ac = getNightAC(b, floor);
-  if (ac === 27) return 100; // Red (High sleeping load)
-  if (ac === 26) return 50;  // Yellow (Moderate sleeping load)
-  return 0;                  // Green (Eco sleeping load)
+  // Map scores: 27°C (high sleep load) -> 100, 26°C -> 66, 25°C -> 33, 24°C -> 0
+  if (ac >= 27) return 100;
+  if (ac === 26) return 66;
+  if (ac === 25) return 33;
+  return 0;
 }

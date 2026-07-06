@@ -100,42 +100,88 @@ export default function MapView({ blocks, selectedId, onSelect, flyToTarget, vie
         getPolygon: (b) => b.polygon,
         extruded: false,
         getFillColor: (b) => {
-          let score = scoreFromLST(b.lst);
-          if (viewMode === 'ac_noon') score = getNoonACScore(b, floorLevel);
-          if (viewMode === 'ac_night') score = getNightACScore(b, floorLevel);
-          
-          const c = heatColor(score);
-          const alpha =
-            selectedId
-              ? b.id === selectedId
-                ? 230
+          // If in LST view, render thermal colors. Otherwise, render faint boundary guides.
+          if (viewMode === 'temp') {
+            const score = scoreFromLST(b.lst);
+            const c = heatColor(score);
+            const alpha =
+              selectedId
+                ? b.id === selectedId
+                  ? 230
+                  : b.id === hovered
+                    ? 180
+                    : 130
                 : b.id === hovered
-                  ? 180
-                  : 130
-              : b.id === hovered
-                ? 190
-                : 150;
-          return [c[0], c[1], c[2], alpha];
+                  ? 190
+                  : 150;
+            return [c[0], c[1], c[2], alpha];
+          }
+          return [255, 255, 255, 12]; // faint background in AC views
         },
         getLineColor: (b) =>
-          b.id === selectedId ? [255, 255, 255, 240] : [255, 255, 255, 40],
+          b.id === selectedId 
+            ? [255, 255, 255, 240] 
+            : viewMode === 'temp'
+              ? [255, 255, 255, 45]
+              : [255, 255, 255, 18],
         getLineWidth: (b) => (b.id === selectedId ? 28 : 6),
         lineWidthUnits: "meters",
         stroked: true,
         pickable: true,
         updateTriggers: {
           getFillColor: [selectedId, hovered, viewMode, floorLevel],
-          getLineColor: [selectedId],
+          getLineColor: [selectedId, viewMode],
           getLineWidth: [selectedId],
         },
         transitions: {
-          getFillColor: { duration: 400, easing: easeOutQuint },
+          getFillColor: { duration: 250, easing: easeOutQuint },
         },
         onHover: (info: PickingInfo<Block>) => setHovered(info.object?.id ?? null),
         onClick: (info: PickingInfo<Block>) => onSelect(info.object ?? null),
       }),
-    [blocks, selectedId, hovered, onSelect],
+    [blocks, selectedId, hovered, onSelect, viewMode, floorLevel],
   );
+
+  // ── AC Setpoint Nodes Layer (Scatterplot markers) ────────────────────────
+  const acLayer = useMemo(() => {
+    if (viewMode === 'temp') return null;
+    return new ScatterplotLayer<Block>({
+      id: "ac-nodes",
+      data: blocks,
+      getPosition: (b) => [b.center[0], b.center[1]],
+      getRadius: 260,
+      radiusUnits: "meters",
+      getFillColor: (b) => {
+        const score = viewMode === 'ac_noon' ? getNoonACScore(b, floorLevel) : getNightACScore(b, floorLevel);
+        const c = heatColor(score);
+        const alpha = 
+          selectedId
+            ? b.id === selectedId
+              ? 235
+              : b.id === hovered
+                ? 175
+                : 110
+            : b.id === hovered
+              ? 190
+              : 145;
+        return [c[0], c[1], c[2], alpha];
+      },
+      getLineColor: (b) => 
+        b.id === selectedId ? [255, 255, 255, 240] : [255, 255, 255, 60],
+      lineWidthMinPixels: 1.5,
+      stroked: true,
+      pickable: true,
+      updateTriggers: {
+        getFillColor: [selectedId, hovered, viewMode, floorLevel],
+        getLineColor: [selectedId],
+      },
+      transitions: {
+        getFillColor: { duration: 250, easing: easeOutQuint },
+      },
+      onHover: (info: PickingInfo<Block>) => setHovered(info.object?.id ?? null),
+      onClick: (info: PickingInfo<Block>) => onSelect(info.object ?? null),
+    });
+  }, [blocks, selectedId, hovered, onSelect, viewMode, floorLevel]);
 
   // ── User location dot (pulsing blue) ─────────────────────────────────────
   const [pulse, setPulse] = useState(1);
@@ -164,8 +210,12 @@ export default function MapView({ blocks, selectedId, onSelect, flyToTarget, vie
   }, [userLocation, pulse]);
 
   const layers = useMemo(
-    () => [hexLayer, ...(locationLayer ? [locationLayer] : [])],
-    [hexLayer, locationLayer],
+    () => [
+      hexLayer, 
+      ...(acLayer ? [acLayer] : []),
+      ...(locationLayer ? [locationLayer] : [])
+    ],
+    [hexLayer, acLayer, locationLayer],
   );
 
   return (

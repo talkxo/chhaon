@@ -450,35 +450,74 @@ export default function Sidebar({ blocks, selected, onSelect, onBrief, briefLoad
                 </div>
 
                 {/* Micro-explanation for AC recommendation logic */}
-                {viewMode !== 'temp' && (
-                  <div className="rounded-xl bg-blue-500/5 border border-blue-500/10 p-3 mb-3 text-[10.5px] leading-relaxed text-blue-200">
-                    <div className="font-semibold mb-1.5 flex items-center gap-1.5 text-xs text-blue-300">
-                      <span>💡</span> Recommended Setpoint Rationale
+                {viewMode !== 'temp' && (() => {
+                  const setpoint = viewMode === 'ac_noon' ? getNoonAC(selected, floorLevel) : getNightAC(selected, floorLevel);
+                  // Calculate energy saving relative to a standard 22°C baseline
+                  const pctSaved = (setpoint - 22) * 6;
+                  
+                  const isTopFloor = floorLevel === '5+';
+                  const isLowFloor = floorLevel === '1-2';
+                  
+                  // Construct block-specific microclimate context
+                  let microclimateExplanation = "";
+                  if (selected.density >= 0.75) {
+                    microclimateExplanation += `High built density (${Math.round(selected.density * 100)}%) traps heat in concrete. `;
+                  } else {
+                    microclimateExplanation += `Low built density (${Math.round(selected.density * 100)}%) allows better airflow. `;
+                  }
+                  
+                  if (selected.canopy <= 0.15) {
+                    microclimateExplanation += `Near-zero tree canopy (${Math.round(selected.canopy * 100)}%) offers no solar shade, `;
+                  } else {
+                    microclimateExplanation += `Healthy tree canopy (${Math.round(selected.canopy * 100)}%) helps dissipate surface heat, `;
+                  }
+                  
+                  if (selected.traffic >= 0.7) {
+                    microclimateExplanation += `and high traffic congestion contributes heavily to local air heating.`;
+                  } else {
+                    microclimateExplanation += `with minimal waste heat from vehicle traffic.`;
+                  }
+
+                  let floorEffectText = "";
+                  if (isLowFloor) {
+                    floorEffectText = "Lower floor levels (1-2) benefit from natural tree-level shading, reducing indoor temperatures by up to -1.2°C.";
+                  } else if (isTopFloor) {
+                    floorEffectText = "At the 5+ floor level, the roof acts as a solar radiator, adding +1.8°C of direct heat load directly into your rooms.";
+                  } else {
+                    floorEffectText = "Mid floor levels (3-4) represent standard urban exposure, above tree line but below direct roof solar radiation.";
+                  }
+
+                  return (
+                    <div className="rounded-xl bg-blue-500/5 border border-blue-500/10 p-3 mb-3 text-[10.5px] leading-relaxed text-blue-200">
+                      <div className="font-semibold mb-1.5 flex items-center gap-1.5 text-xs text-blue-300">
+                        <span>💡</span> Block Setpoint Rationale
+                      </div>
+                      <div className="space-y-2">
+                        <p>
+                          Recommended AC setpoint is{" "}
+                          <strong className="text-white font-bold">{setpoint}°C</strong> (LST is {selected.lst.toFixed(1)}°C).
+                        </p>
+                        <p className="text-white/70 italic bg-white/[0.03] p-1.5 rounded-lg border border-white/5">
+                          {microclimateExplanation}
+                        </p>
+                        <p className="text-white/70">
+                          {floorEffectText}
+                        </p>
+                        <ul className="space-y-1 pl-3 list-disc text-white/70">
+                          <li>
+                            <strong className="text-white font-semibold">Savings:</strong> Reduces power consumption by{" "}
+                            <strong className="text-white font-bold">{pctSaved}%</strong> compared to a baseline of 22°C.
+                          </li>
+                          <li>
+                            <strong className="text-white font-semibold">Grid Impact:</strong> {setpoint >= 26 
+                              ? "Critical heat zone. Setting AC here to 26-27°C prevents local Cyber City transformer failure." 
+                              : "Eco-comfort zone. Minimal stress on the local power substation."}
+                          </li>
+                        </ul>
+                      </div>
                     </div>
-                    <div className="space-y-2">
-                      <p>
-                        The recommended AC temperature in this block is set to{" "}
-                        <strong className="text-white font-bold">
-                          {viewMode === 'ac_noon' ? getNoonAC(selected, floorLevel) : getNightAC(selected, floorLevel)}°C
-                        </strong>{" "}
-                        based on local microclimate heat index (LST: {selected.lst.toFixed(1)}°C, adjusted for floor level {floorLevel}).
-                      </p>
-                      <ul className="space-y-1.5 pl-3 list-disc text-white/70">
-                        <li>
-                          <strong className="text-white font-semibold">Energy Savings:</strong> Keeping the setpoint at{" "}
-                          {viewMode === 'ac_noon' ? getNoonAC(selected, floorLevel) : getNightAC(selected, floorLevel)}°C{" "}
-                          limits extreme outdoor-indoor thermal delta, reducing compressor strain and cutting power bills by ~6% for every 1°C increase.
-                        </li>
-                        <li>
-                          <strong className="text-white font-semibold">Grid Stability:</strong> Red-colored areas indicate extreme heat load risk. Raising setpoints to 26°C-27°C here prevents substation transformer overload and blackouts.
-                        </li>
-                        <li>
-                          <strong className="text-white font-semibold">Thermal Shock:</strong> Stepping from freezing rooms directly into {selected.lst.toFixed(0)}°C surface heat strains circulation. Closer outdoor-indoor deltas prevent heat exhaustion.
-                        </li>
-                      </ul>
-                    </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* Temp curve */}
                 {curve && (
