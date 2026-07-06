@@ -449,6 +449,37 @@ export default function Sidebar({ blocks, selected, onSelect, onBrief, briefLoad
                   <Vital label="Canopy" value={`${Math.round(selected.canopy * 100)}%`} />
                 </div>
 
+                {/* Micro-explanation for AC recommendation logic */}
+                {viewMode !== 'temp' && (
+                  <div className="rounded-xl bg-blue-500/5 border border-blue-500/10 p-3 mb-3 text-[10.5px] leading-relaxed text-blue-200">
+                    <div className="font-semibold mb-1.5 flex items-center gap-1.5 text-xs text-blue-300">
+                      <span>💡</span> Recommended Setpoint Rationale
+                    </div>
+                    <div className="space-y-2">
+                      <p>
+                        The recommended AC temperature in this block is set to{" "}
+                        <strong className="text-white font-bold">
+                          {viewMode === 'ac_noon' ? getNoonAC(selected, floorLevel) : getNightAC(selected, floorLevel)}°C
+                        </strong>{" "}
+                        based on local microclimate heat index (LST: {selected.lst.toFixed(1)}°C, adjusted for floor level {floorLevel}).
+                      </p>
+                      <ul className="space-y-1.5 pl-3 list-disc text-white/70">
+                        <li>
+                          <strong className="text-white font-semibold">Energy Savings:</strong> Keeping the setpoint at{" "}
+                          {viewMode === 'ac_noon' ? getNoonAC(selected, floorLevel) : getNightAC(selected, floorLevel)}°C{" "}
+                          limits extreme outdoor-indoor thermal delta, reducing compressor strain and cutting power bills by ~6% for every 1°C increase.
+                        </li>
+                        <li>
+                          <strong className="text-white font-semibold">Grid Stability:</strong> Red-colored areas indicate extreme heat load risk. Raising setpoints to 26°C-27°C here prevents substation transformer overload and blackouts.
+                        </li>
+                        <li>
+                          <strong className="text-white font-semibold">Thermal Shock:</strong> Stepping from freezing rooms directly into {selected.lst.toFixed(0)}°C surface heat strains circulation. Closer outdoor-indoor deltas prevent heat exhaustion.
+                        </li>
+                      </ul>
+                    </div>
+                  </div>
+                )}
+
                 {/* Temp curve */}
                 {curve && (
                   <div className="rounded-xl bg-white/[0.04] px-3 py-2.5 mb-3">
@@ -487,12 +518,19 @@ export default function Sidebar({ blocks, selected, onSelect, onBrief, briefLoad
                 className="px-4 py-3"
               >
                 {/* List header */}
-                <div className="mb-3 flex items-baseline justify-between">
+                <div className="mb-2 flex items-baseline justify-between">
                   <h2 className="font-display text-sm font-bold text-white">All areas</h2>
                   <span className="text-[11px] text-white/35">
                     {totalShown} block{totalShown !== 1 ? "s" : ""}
                   </span>
                 </div>
+
+                {/* List Legend Info */}
+                {viewMode !== 'temp' && (
+                  <div className="rounded-lg bg-white/[0.03] border border-white/[0.05] px-2.5 py-1.5 mb-3 text-[10px] text-white/50 leading-normal">
+                    🟢 Green = Eco Setpoint (24-25°C) · 🔴 Red = High Stress Setpoint (26-27°C)
+                  </div>
+                )}
 
                 {groupedBlocks.length === 0 ? (
                   <p className="py-10 text-center text-sm text-white/35">
