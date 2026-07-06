@@ -275,6 +275,31 @@ export function heatColor(score: number): [number, number, number] {
   return STOPS[STOPS.length - 1][1];
 }
 
+const AC_STOPS: [number, [number, number, number]][] = [
+  [0.0,  [56, 189, 248]],   // 23°C: Solid Blue
+  [0.25, [186, 230, 253]],  // 24°C: Light Blue
+  [0.50, [248, 250, 252]],  // 25°C: Off-White
+  [0.75, [254, 240, 138]],  // 26°C: Light Yellow
+  [1.0,  [250, 204, 21]],   // 27°C: Solid Yellow
+];
+
+export function acColor(score: number): [number, number, number] {
+  const t = clamp(score / 100, 0, 1);
+  for (let i = 1; i < AC_STOPS.length; i++) {
+    if (t <= AC_STOPS[i][0]) {
+      const [t0, c0] = AC_STOPS[i - 1];
+      const [t1, c1] = AC_STOPS[i];
+      const f = (t - t0) / (t1 - t0);
+      return [
+        Math.round(c0[0] + f * (c1[0] - c0[0])),
+        Math.round(c0[1] + f * (c1[1] - c0[1])),
+        Math.round(c0[2] + f * (c1[2] - c0[2])),
+      ];
+    }
+  }
+  return AC_STOPS[AC_STOPS.length - 1][1];
+}
+
 export function cityStats(blocks: Block[]) {
   const avg = blocks.reduce((s, b) => s + b.lst, 0) / blocks.length;
   const hottest = blocks.reduce((a, b) => (b.lst > a.lst ? b : a));
@@ -295,45 +320,27 @@ export function getFloorOffset(floor: FloorLevel): number {
   return 0.0;
 }
 
-export function getNoonAC(b: Block, floor: FloorLevel = '3-4'): number {
-  let base = 24;
-  if (floor === '1-2') base = 23;
-  if (floor === '5+') base = 25;
+export function getAC(b: Block, floor: FloorLevel = '3-4'): number {
+  const score = b.score;
+  
+  let target = 23; 
+  if (score > 20) target = 24;
+  if (score > 40) target = 25;
+  if (score > 60) target = 26;
+  if (score > 80) target = 27;
 
-  // Add load adjustments for hot blocks
-  if (b.lst >= 42.0) {
-    base += (floor === '5+') ? 2 : 1;
-  }
-  return base;
+  if (floor === '1-2') target -= 1;
+  if (floor === '5+') target += 1;
+
+  return Math.max(23, Math.min(27, target));
 }
 
-export function getNightAC(b: Block, floor: FloorLevel = '3-4'): number {
-  let base = 25;
-  if (floor === '1-2') base = 24;
-  if (floor === '5+') base = 26;
-
-  // Adjust for heat islands holding warmth at night
-  if (b.lst >= 41.0) {
-    base += 1;
-  }
-  return base;
-}
-
-export function getNoonACScore(b: Block, floor: FloorLevel = '3-4'): number {
-  const ac = getNoonAC(b, floor);
+export function getACScore(b: Block, floor: FloorLevel = '3-4'): number {
+  const ac = getAC(b, floor);
   // Map scores: 27°C (high load/hot block) -> 100, 26°C -> 75, 25°C -> 50, 24°C -> 25, 23°C -> 0
   if (ac >= 27) return 100;
   if (ac === 26) return 75;
   if (ac === 25) return 50;
   if (ac === 24) return 25;
-  return 0;
-}
-
-export function getNightACScore(b: Block, floor: FloorLevel = '3-4'): number {
-  const ac = getNightAC(b, floor);
-  // Map scores: 27°C (high sleep load) -> 100, 26°C -> 66, 25°C -> 33, 24°C -> 0
-  if (ac >= 27) return 100;
-  if (ac === 26) return 66;
-  if (ac === 25) return 33;
   return 0;
 }

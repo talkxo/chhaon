@@ -68,8 +68,9 @@ export default function Home() {
   const [flyToTarget, setFlyToTarget] = useState<FlyTarget | null>(null);
 
   // View state layers and building floors filters
-  const [viewMode, setViewMode] = useState<"temp" | "ac_noon" | "ac_night">("temp");
+  const [viewMode, setViewMode] = useState<"temp" | "ac">("temp");
   const [floorLevel, setFloorLevel] = useState<FloorLevel>("3-4");
+  const [userLocation, setUserLocation] = useState<{ longitude: number; latitude: number } | null>(null);
 
   const selected = useMemo(
     () => blocks.find((b) => b.id === selectedId) ?? null,
@@ -80,16 +81,7 @@ export default function Home() {
     setSelectedId(b?.id ?? null);
   }, []);
 
-  const handleBrief = useCallback((b: Block) => {
-    const floorLabel = { "1-2": "1st-2nd floor (shaded level)", "3-4": "3rd-4th floor (mid level)", "5+": "5th+ top floor (roof solar radiation exposure)" }[floorLevel];
-    setSeed([
-      {
-        role: "user",
-        content: `Write a full intervention brief for ${b.name}. Cover: why this block runs hot (density ${Math.round(b.density * 100)}%, NDVI ${b.ndvi.toFixed(2)}, albedo ${b.albedo.toFixed(2)}, canopy ${Math.round(b.canopy * 100)}%), calculations for ${floorLabel}, the recommended indoor AC setpoint & intervention mix with expected relief in Indian conditions, rough cost, and what to verify on the ground.`,
-      },
-    ]);
-    setAskOpen(true);
-  }, [floorLevel]);
+
 
   const handleFlyTo = useCallback((target: FlyTarget) => {
     setFlyToTarget({ ...target, _ts: Date.now() } as FlyTarget & { _ts: number });
@@ -105,6 +97,8 @@ export default function Home() {
         onSelect={handleSelect}
         viewMode={viewMode}
         floorLevel={floorLevel}
+        userLocation={userLocation}
+        onUserLocationChange={setUserLocation}
       />
 
       {/* Sidebar — left panel, 320 px */}
@@ -112,13 +106,13 @@ export default function Home() {
         blocks={blocks}
         selected={selected}
         onSelect={handleSelect}
-        onBrief={handleBrief}
-        briefLoading={false}
         onFlyTo={handleFlyTo}
         viewMode={viewMode}
         floorLevel={floorLevel}
         onFloorLevelChange={setFloorLevel}
         weather={weather}
+        userLocation={userLocation}
+        onUserLocationChange={setUserLocation}
       />
 
       {/* TopBar — floats top-right, leaves sidebar gap */}

@@ -6,7 +6,7 @@ import { PolygonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { FlyToInterpolator, type MapViewState, type PickingInfo } from "@deck.gl/core";
 import { Map } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Block, heatColor, scoreFromLST, getNoonACScore, getNightACScore, FloorLevel } from "@/lib/model";
+import { Block, heatColor, acColor, scoreFromLST, getACScore, FloorLevel } from "@/lib/model";
 import type { FlyTarget } from "./BottomSheet";
 
 // Dark basemap WITH labels so streets and locality names are visible
@@ -29,23 +29,33 @@ type Props = {
   selectedId: string | null;
   onSelect: (block: Block | null) => void;
   flyToTarget: FlyTarget | null;
-  viewMode: 'temp' | 'ac_noon' | 'ac_night';
+  viewMode: 'temp' | 'ac';
   floorLevel: FloorLevel;
+  userLocation: { longitude: number; latitude: number } | null;
+  onUserLocationChange: (loc: { longitude: number; latitude: number } | null) => void;
 };
 
-export default function MapView({ blocks, selectedId, onSelect, flyToTarget, viewMode, floorLevel }: Props) {
+export default function MapView({
+  blocks,
+  selectedId,
+  onSelect,
+  flyToTarget,
+  viewMode,
+  floorLevel,
+  userLocation,
+  onUserLocationChange,
+}: Props) {
   const [viewState, setViewState] = useState<MapViewState>(INITIAL_VIEW);
   const [hovered, setHovered] = useState<string | null>(null);
-  const [userLocation, setUserLocation] = useState<UserLocation>(null);
   const [locError, setLocError] = useState(false);
   const locWatchId = useRef<number | null>(null);
 
-  // ── Current location ──────────────────────────────────────────────────────
+  // ── Current location listener ──────────────────────────────────────────────
   useEffect(() => {
     if (!navigator.geolocation) return;
 
     const handleSuccess = (pos: GeolocationPosition) => {
-      setUserLocation({
+      onUserLocationChange({
         longitude: pos.coords.longitude,
         latitude: pos.coords.latitude,
       });
@@ -53,7 +63,7 @@ export default function MapView({ blocks, selectedId, onSelect, flyToTarget, vie
     };
 
     const handleError = () => {
-      // Fallback: retry with standard accuracy (Wi-Fi/IP triangulation) which is fast and works indoors
+      // Fallback: retry with standard accuracy (Wi-Fi/IP triangulation)
       navigator.geolocation.getCurrentPosition(
         handleSuccess,
         () => setLocError(true),
@@ -71,7 +81,7 @@ export default function MapView({ blocks, selectedId, onSelect, flyToTarget, vie
       if (locWatchId.current !== null)
         navigator.geolocation.clearWatch(locWatchId.current);
     };
-  }, []);
+  }, [onUserLocationChange]);
 
   const flyToLocation = useCallback((lng: number, lat: number, zoom = 13.5) => {
     setViewState((v) => ({
@@ -84,28 +94,6 @@ export default function MapView({ blocks, selectedId, onSelect, flyToTarget, vie
       transitionEasing: easeOutQuint,
     }));
   }, []);
-
-  const handleMyLocation = useCallback(() => {
-    if (userLocation) {
-      flyToLocation(userLocation.longitude, userLocation.latitude, 14);
-    } else {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          setUserLocation({
-            longitude: pos.coords.longitude,
-            latitude: pos.coords.latitude,
-          });
-          flyToLocation(pos.coords.longitude, pos.coords.latitude, 14);
-        },
-        (err) => {
-          console.warn("High/low accuracy geolocation failed, centering on Gurugram core:", err);
-          // Fallback to city center so they aren't stuck with a silent failure
-          flyToLocation(77.035, 28.435, 13.5);
-        },
-        { enableHighAccuracy: false, timeout: 10000 }
-      );
-    }
-  }, [userLocation, flyToLocation]);
 
   // ── Fly to selected block ─────────────────────────────────────────────────
   useEffect(() => {
@@ -129,10 +117,9 @@ export default function MapView({ blocks, selectedId, onSelect, flyToTarget, vie
         extruded: false,
         getFillColor: (b) => {
           let score = scoreFromLST(b.lst);
-          if (viewMode === 'ac_noon') score = getNoonACScore(b, floorLevel);
-          if (viewMode === 'ac_night') score = getNightACScore(b, floorLevel);
+          if (viewMode === 'ac') score = getACScore(b, floorLevel);
           
-          const c = heatColor(score);
+          const c = viewMode === 'ac' ? acColor(score) : heatColor(score);
           const alpha =
             selectedId
               ? b.id === selectedId
@@ -212,36 +199,6 @@ export default function MapView({ blocks, selectedId, onSelect, flyToTarget, vie
         <Map mapStyle={BASEMAP} attributionControl={false} />
       </DeckGL>
 
-      {/* My Location button */}
-      <button
-        onClick={handleMyLocation}
-        title="My location"
-        className="my-location-btn"
-        style={{
-          position: "absolute",
-          right: 16,
-          bottom: 100,
-          zIndex: 15,
-          width: 44,
-          height: 44,
-          borderRadius: "50%",
-          background: "rgba(13,15,28,0.88)",
-          backdropFilter: "blur(12px)",
-          WebkitBackdropFilter: "blur(12px)",
-          border: "1px solid rgba(255,255,255,0.12)",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          cursor: "pointer",
-          boxShadow: "0 2px 12px rgba(0,0,0,0.5)",
-          transition: "background 0.2s",
-          color: userLocation ? "#3b82f6" : "rgba(255,255,255,0.6)",
-          fontSize: 20,
-        }}
-        aria-label="Center map on my location"
-      >
-        ◎
-      </button>
     </div>
   );
 }

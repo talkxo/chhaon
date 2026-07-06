@@ -6,14 +6,14 @@ import {
   Block,
   diurnalCurve,
   heatColor,
+  acColor,
   NO_INTERVENTIONS,
-  getNoonAC,
-  getNightAC,
-  getNoonACScore,
-  getNightACScore,
+  getAC,
+  getACScore,
   FloorLevel,
 } from "@/lib/model";
 import TempCurve from "./TempCurve";
+import { AssistantCard } from "./AskTwin";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -29,10 +29,8 @@ type Props = {
   blocks: Block[];
   selected: Block | null;
   onSelect: (b: Block | null) => void;
-  onBrief: (b: Block) => void;
-  briefLoading: boolean;
   onFlyTo: (target: FlyTarget) => void;
-  viewMode: 'temp' | 'ac_noon' | 'ac_night';
+  viewMode: 'temp' | 'ac';
   floorLevel: FloorLevel;
   onFloorLevelChange: (f: FloorLevel) => void;
   weather: {
@@ -42,6 +40,8 @@ type Props = {
     windSpeed: number;
     weatherCode: number;
   };
+  userLocation: { longitude: number; latitude: number } | null;
+  onUserLocationChange: (loc: { longitude: number; latitude: number } | null) => void;
 };
 
 // ── Nominatim geocoding ───────────────────────────────────────────────────────
@@ -71,20 +71,16 @@ async function geocode(q: string): Promise<GeoResult[]> {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
-function HeatBadge({ score, lst, viewMode, b, floorLevel }: { score: number; lst: number; viewMode: 'temp' | 'ac_noon' | 'ac_night'; b: Block; floorLevel: FloorLevel }) {
+function HeatBadge({ score, lst, viewMode, b, floorLevel }: { score: number; lst: number; viewMode: 'temp' | 'ac'; b: Block; floorLevel: FloorLevel }) {
   let displayScore = score;
   let displayVal = `${lst.toFixed(1)}°C`;
   let title = "LST";
-  if (viewMode === 'ac_noon') {
-    displayScore = getNoonACScore(b, floorLevel);
-    displayVal = `${getNoonAC(b, floorLevel)}°C`;
-    title = "AC SETPOINT";
-  } else if (viewMode === 'ac_night') {
-    displayScore = getNightACScore(b, floorLevel);
-    displayVal = `${getNightAC(b, floorLevel)}°C`;
+  if (viewMode === 'ac') {
+    displayScore = getACScore(b, floorLevel);
+    displayVal = `${getAC(b, floorLevel)}°C`;
     title = "AC SETPOINT";
   }
-  const c = heatColor(displayScore);
+  const c = viewMode === 'ac' ? acColor(displayScore) : heatColor(displayScore);
   const color = `rgb(${c.join(",")})`;
   return (
     <div
@@ -129,16 +125,40 @@ function HeatBar({ score }: { score: number }) {
   );
 }
 
-function BlockRow({ b, index, onSelect, viewMode, floorLevel }: { b: Block; index: number; onSelect: (b: Block) => void; viewMode: 'temp' | 'ac_noon' | 'ac_night'; floorLevel: FloorLevel }) {
-  let score = b.score;
-  let label = `${b.lst.toFixed(1)}°`;
-  if (viewMode === 'ac_noon') {
-    score = getNoonACScore(b, floorLevel);
-    label = `${getNoonAC(b, floorLevel)}°C`;
-  } else if (viewMode === 'ac_night') {
-    score = getNightACScore(b, floorLevel);
-    label = `${getNightAC(b, floorLevel)}°C`;
+function BlockRow({ b, index, onSelect, viewMode, floorLevel }: { b: Block; index: number; onSelect: (b: Block) => void; viewMode: 'temp' | 'ac'; floorLevel: FloorLevel }) {
+  const score = b.score;
+  const label = `${b.lst.toFixed(1)}°`;
+  
+  if (viewMode === 'ac') {
+    const acScore = getACScore(b, floorLevel);
+    const rgb = acColor(acScore);
+    const cssRgb = `rgb(${rgb.join(",")})`;
+    return (
+      <motion.button
+        key={b.id}
+        initial={{ opacity: 0, x: -10 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.25, ease: EASE, delay: Math.min(index * 0.02, 0.35) }}
+        onClick={() => onSelect(b)}
+        className="flex w-full items-center gap-2.5 rounded-xl bg-white/[0.04] px-2.5 py-2 text-left transition hover:bg-white/[0.09] active:scale-[0.99]"
+      >
+        <span className="h-7 w-1 flex-none rounded-full" style={{ backgroundColor: cssRgb }} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-medium text-white leading-tight">{b.name}</span>
+          <div className="flex items-center gap-2 mt-1">
+            <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
+              <div className="h-full rounded-full transition-all duration-500" style={{ width: `${acScore}%`, backgroundColor: cssRgb }} />
+            </div>
+            <span className="text-[10px] text-white/40 w-7 text-right">{Math.round(acScore)}%</span>
+          </div>
+        </span>
+        <span className="font-display text-sm font-bold flex-none text-white">
+          {getAC(b, floorLevel)}°C
+        </span>
+      </motion.button>
+    );
   }
+
   const c = heatColor(score);
   return (
     <motion.button
@@ -175,17 +195,79 @@ function riskLabel(score: number) {
 }
 
 // ── MapSearch ─────────────────────────────────────────────────────────────────
-function MapSearch({ onFlyTo, blockSearch, onBlockSearch }: {
+function MapSearch({
+  onFlyTo,
+  blockSearch,
+  onBlockSearch,
+  userLocation,
+  onUserLocationChange,
+  blocks,
+  onSelect
+}: {
   onFlyTo: (t: FlyTarget) => void;
   blockSearch: string;
   onBlockSearch: (q: string) => void;
+  userLocation: { longitude: number; latitude: number } | null;
+  onUserLocationChange: (loc: { longitude: number; latitude: number } | null) => void;
+  blocks: Block[];
+  onSelect: (b: Block) => void;
 }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<GeoResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  const [locating, setLocating] = useState(false);
   const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const selectClosestBlock = (lng: number, lat: number) => {
+    let closest = blocks[0];
+    let minD = Infinity;
+    for (const b of blocks) {
+      const d = Math.hypot(b.center[0] - lng, b.center[1] - lat);
+      if (d < minD) {
+        minD = d;
+        closest = b;
+      }
+    }
+    if (closest) onSelect(closest);
+  };
+
+  const handleLocateClick = () => {
+    if (userLocation) {
+      onFlyTo({
+        lng: userLocation.longitude,
+        lat: userLocation.latitude,
+        zoom: 14.5
+      });
+      selectClosestBlock(userLocation.longitude, userLocation.latitude);
+    } else {
+      setLocating(true);
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setLocating(false);
+          const coords = {
+            longitude: pos.coords.longitude,
+            latitude: pos.coords.latitude,
+          };
+          onUserLocationChange(coords);
+          onFlyTo({
+            lng: coords.longitude,
+            lat: coords.latitude,
+            zoom: 14.5
+          });
+          selectClosestBlock(coords.longitude, coords.latitude);
+        },
+        (err) => {
+          setLocating(false);
+          console.warn("Geolocation failed", err);
+          // Fallback to Gurugram city center
+          onFlyTo({ lng: 77.035, lat: 28.435, zoom: 13.5 });
+        },
+        { enableHighAccuracy: false, timeout: 8000 }
+      );
+    }
+  };
 
   const handleChange = (val: string) => {
     setQuery(val);
@@ -261,13 +343,40 @@ function MapSearch({ onFlyTo, blockSearch, onBlockSearch }: {
           aria-label="Search map location or block"
           autoComplete="off"
         />
-        {query && (
+        {query ? (
           <button
             onClick={clear}
-            className="flex-none text-white/40 hover:text-white/70 transition text-sm leading-none"
+            className="flex-none text-white/40 hover:text-white/70 transition text-sm leading-none p-1"
             aria-label="Clear search"
           >
             ✕
+          </button>
+        ) : (
+          <button
+            onClick={handleLocateClick}
+            type="button"
+            title="Locate me"
+            className="flex-none text-white/45 hover:text-emerald-400 active:text-emerald-300 transition p-1 cursor-pointer hover:scale-105 active:scale-95"
+            aria-label="Center map on my location"
+          >
+            {locating ? (
+              <motion.span
+                animate={{ rotate: 360 }}
+                transition={{ repeat: Infinity, duration: 1, ease: "linear" }}
+                className="block text-[12px] leading-none"
+              >
+                ↻
+              </motion.span>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="10" />
+                <circle cx="12" cy="12" r="3" fill="currentColor" />
+                <line x1="12" y1="1" x2="12" y2="3" />
+                <line x1="12" y1="21" x2="12" y2="23" />
+                <line x1="1" y1="12" x2="3" y2="12" />
+                <line x1="21" y1="12" x2="23" y2="12" />
+              </svg>
+            )}
           </button>
         )}
       </div>
@@ -313,7 +422,67 @@ function MapSearch({ onFlyTo, blockSearch, onBlockSearch }: {
   );
 }
 
-export default function Sidebar({ blocks, selected, onSelect, onBrief, briefLoading, onFlyTo, viewMode, floorLevel, onFloorLevelChange, weather }: Props) {
+function BlockAIIntervention({ b, floorLevel }: { b: Block; floorLevel: FloorLevel }) {
+  const [loading, setLoading] = useState(true);
+  const [jsonStr, setJsonStr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setJsonStr(null);
+    
+    const floorLabel = { "1-2": "1st-2nd floor (shaded level)", "3-4": "3rd-4th floor (mid level)", "5+": "5th+ top floor (roof solar radiation exposure)" }[floorLevel];
+    const prompt = `Write a full intervention brief for ${b.name}. Cover: why this block runs hot (density ${Math.round(b.density * 100)}%, NDVI ${b.ndvi.toFixed(2)}, albedo ${b.albedo.toFixed(2)}, canopy ${Math.round(b.canopy * 100)}%), calculations for ${floorLabel}, the recommended indoor AC setpoint & intervention mix with expected relief in Indian conditions, rough cost, and what to verify on the ground.`;
+
+    const contextStr = `Block ${b.name} (${b.area}): LST ${b.lst.toFixed(1)}°C, heat score ${Math.round(b.score)}/100, density ${b.density.toFixed(2)}, NDVI ${b.ndvi.toFixed(2)}, albedo ${b.albedo.toFixed(2)}, canopy ${b.canopy.toFixed(2)}, traffic ${b.traffic.toFixed(2)}`;
+
+    fetch("/api/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ 
+        messages: [{ role: "user", content: prompt }], 
+        context: contextStr
+      }),
+    })
+    .then(r => r.json())
+    .then(data => {
+      if (active) setJsonStr(data.reply);
+    })
+    .catch(err => {
+      if (active) console.error("Failed to load AI intervention brief:", err);
+    })
+    .finally(() => {
+      if (active) setLoading(false);
+    });
+
+    return () => { active = false; };
+  }, [b.id, floorLevel, b.name, b.area, b.lst, b.score, b.density, b.ndvi, b.albedo, b.canopy, b.traffic]);
+
+  return (
+    <div className="mt-4 border-t border-white/5 pt-4">
+      <div className="flex items-center gap-2 mb-4 text-emerald-400">
+        <span className="text-sm">✦</span>
+        <h3 className="font-display font-bold tracking-wide uppercase text-[11px]">AI Climate Rationale & Interventions</h3>
+      </div>
+      {loading ? (
+        <div className="space-y-3 py-2">
+          <div className="h-3 w-3/4 bg-white/5 rounded animate-pulse" />
+          <div className="h-3 w-full bg-white/5 rounded animate-pulse" />
+          <div className="h-3 w-5/6 bg-white/5 rounded animate-pulse" />
+          <div className="h-16 w-full bg-white/5 rounded-xl animate-pulse mt-4" />
+        </div>
+      ) : jsonStr ? (
+        <div className="[&_p]:text-[13px]">
+          <AssistantCard jsonStr={jsonStr} />
+        </div>
+      ) : (
+        <p className="text-white/50 text-sm">Failed to generate AI brief.</p>
+      )}
+    </div>
+  );
+}
+
+export default function Sidebar({ blocks, selected, onSelect, onFlyTo, viewMode, floorLevel, onFloorLevelChange, weather, userLocation, onUserLocationChange }: Props) {
   const [blockSearch, setBlockSearch] = useState("");
 
   // ── All blocks grouped by area, sorted by heat ───────────────────────────
@@ -359,15 +528,14 @@ export default function Sidebar({ blocks, selected, onSelect, onBrief, briefLoad
     setRationaleLoading(true);
     setRationale(null);
 
-    const timeOfDay = viewMode === 'ac_noon' ? 'Noon' : 'Night';
-    const setpoint = viewMode === 'ac_noon' ? getNoonAC(selected, floorLevel) : getNightAC(selected, floorLevel);
+    const setpoint = getAC(selected, floorLevel);
 
-    const context = `Block ${selected.name} (${selected.area}): LST ${selected.lst.toFixed(1)}°C, density ${Math.round(selected.density * 100)}%, canopy ${Math.round(selected.canopy * 100)}%, traffic ${Math.round(selected.traffic * 100)}%, floor level ${floorLevel}. Live City Weather: Air Temp ${weather.temperature.toFixed(1)}°C, Feels-like ${weather.apparentTemp.toFixed(1)}°C, Humidity ${weather.humidity}%, Wind ${weather.windSpeed} km/h.`;
-    const prompt = `Analyze this block. Return a JSON object with keys:
-    - "summary": 1-2 sentence explanation of why the recommended AC temperature is ${setpoint}°C at ${timeOfDay}. Take into account the live conditions: air temp ${weather.temperature.toFixed(1)}°C, feels-like ${weather.apparentTemp.toFixed(1)}°C, relative humidity ${weather.humidity}%, and wind speed ${weather.windSpeed} km/h (specifically explaining how the humidity of ${weather.humidity}% or wind speed of ${weather.windSpeed} km/h changes the comfort or AC strain in this block).
-    - "savings": Energy savings calculation (1 sentence, e.g. "Saves up to X% electricity compared to a baseline of 22°C").
-    - "stress": Localized stress description (1 sentence, detailing combined load on grid capacity, compressor strain, and home electrical wiring safety).
-    Do not wrap in markdown tags.`;
+    const context = `Block ${selected.name} (${selected.area}):
+- Microclimate: LST ${selected.lst.toFixed(1)}°C, Built Density ${Math.round(selected.density * 100)}%, Tree Canopy ${Math.round(selected.canopy * 100)}%, Traffic ${Math.round(selected.traffic * 100)}%.
+- Target Floor: ${floorLevel}
+- Live Weather: Air Temp ${weather.temperature.toFixed(1)}°C, Feels-like ${weather.apparentTemp.toFixed(1)}°C, Humidity ${weather.humidity}%, Wind ${weather.windSpeed} km/h.`;
+
+    const prompt = `Explain why the AC target is exactly ${setpoint}°C for this specific block. Synthesize the block's microclimate (density, canopy, LST) with the live weather (especially the ${weather.humidity}% humidity and ${weather.windSpeed} km/h wind) and floor level. Do not give generic city-wide advice.`;
 
     fetch("/api/rationale", {
       method: "POST",
@@ -438,6 +606,10 @@ export default function Sidebar({ blocks, selected, onSelect, onBrief, briefLoad
               onFlyTo={onFlyTo}
               blockSearch={blockSearch}
               onBlockSearch={setBlockSearch}
+              userLocation={userLocation}
+              onUserLocationChange={onUserLocationChange}
+              blocks={blocks}
+              onSelect={onSelect}
             />
           </div>
 
@@ -519,7 +691,7 @@ export default function Sidebar({ blocks, selected, onSelect, onBrief, briefLoad
 
                 {/* Micro-explanation for AC recommendation logic (AI Generated) */}
                 {viewMode !== 'temp' && (() => {
-                  const setpoint = viewMode === 'ac_noon' ? getNoonAC(selected, floorLevel) : getNightAC(selected, floorLevel);
+                  const setpoint = getAC(selected, floorLevel);
                   // Dynamic savings: 6% per degree saved vs 22°C baseline
                   const pctSaved = (setpoint - 22) * 6;
 
@@ -632,14 +804,10 @@ export default function Sidebar({ blocks, selected, onSelect, onBrief, briefLoad
                   </div>
                 )}
 
-                {/* AI Brief */}
-                <button
-                  onClick={() => onBrief(selected)}
-                  disabled={briefLoading}
-                  className="w-full rounded-xl bg-gradient-to-r from-[#1d4ed8] via-[#0ea5e9] to-[#22c55e] px-4 py-2.5 font-display text-sm font-bold text-white shadow-lg shadow-blue-900/40 transition active:scale-[0.98] disabled:opacity-50 hover:brightness-110"
-                >
-                  {briefLoading ? "Thinking…" : "✦ AI intervention brief"}
-                </button>
+                {/* AI Interventions Widget */}
+                {viewMode === 'temp' && (
+                  <BlockAIIntervention b={selected} floorLevel={floorLevel} />
+                )}
 
                 {/* Back to list */}
                 <button

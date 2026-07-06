@@ -8,7 +8,7 @@ const EASE = [0.22, 1, 0.36, 1] as const;
 
 type Msg = { role: "user" | "assistant"; content: string };
 
-type AssistantJSON = {
+export type AssistantJSON = {
   summary: string;
   vitals?: { label: string; value: string; level?: "success" | "warning" | "danger" | "info" }[];
   chart?: {
@@ -66,7 +66,7 @@ const SUGGESTIONS = [
 ];
 
 // Rich interactive assistant card to render structured microclimate briefs
-function AssistantCard({ jsonStr }: { jsonStr: string }) {
+export function AssistantCard({ jsonStr }: { jsonStr: string }) {
   const parsed = useMemo(() => {
     try {
       // Find the first '{' and last '}' to strip any potential markdown wraps

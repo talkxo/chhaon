@@ -31,17 +31,11 @@ export default function TopBar({
     weatherCode: number;
   };
   onAsk: () => void;
-  viewMode: "temp" | "ac_noon" | "ac_night";
-  onViewModeChange: (m: "temp" | "ac_noon" | "ac_night") => void;
+  viewMode: "temp" | "ac";
+  onViewModeChange: (m: "temp" | "ac") => void;
 }) {
   const stats = cityStats(blocks);
   
-  const modes: { id: typeof viewMode; label: string }[] = [
-    { id: "temp", label: "🌡 LST" },
-    { id: "ac_noon", label: "☀️ Noon" },
-    { id: "ac_night", label: "🌙 Night" },
-  ];
-
   return (
     <motion.header
       initial={{ y: -70, opacity: 0 }}
@@ -73,23 +67,30 @@ export default function TopBar({
         </div>
 
         {/* Dynamic Layer Switcher Pills */}
-        <div className="flex bg-black/35 rounded-xl p-0.5 md:p-1 border border-white/5">
-          {modes.map((m) => {
-            const active = viewMode === m.id;
-            return (
-              <button
-                key={m.id}
-                onClick={() => onViewModeChange(m.id)}
-                className={`px-2 py-1 md:px-3 md:py-1.5 rounded-lg text-[9px] md:text-[10px] font-bold tracking-wider uppercase transition-all duration-300 cursor-pointer ${
-                  active
-                    ? "bg-white/10 text-white shadow-md border border-white/10"
-                    : "text-white/45 hover:text-white/80 border border-transparent"
-                }`}
-              >
-                {m.label}
-              </button>
-            );
-          })}
+        <div className="flex items-center gap-1.5 md:gap-2">
+          {/* Scientific LST heat map button */}
+          <button
+            onClick={() => onViewModeChange("temp")}
+            className={`px-2 py-1 md:px-2.5 md:py-1.5 rounded-xl text-[9px] md:text-[10px] font-bold tracking-wider uppercase transition-all duration-300 border flex items-center gap-1 cursor-pointer ${
+              viewMode === "temp"
+                ? "bg-white/10 text-white shadow border-white/10"
+                : "bg-black/25 text-white/45 hover:text-white/80 border-transparent"
+            }`}
+          >
+            <span>🌡 LST Map</span>
+          </button>
+
+          {/* AC Setpoint advisory button */}
+          <button
+            onClick={() => onViewModeChange("ac")}
+            className={`px-2 py-1 md:px-2.5 md:py-1.5 rounded-xl text-[9px] md:text-[10px] font-bold tracking-wider uppercase transition-all duration-300 border flex items-center gap-1 cursor-pointer ${
+              viewMode === "ac"
+                ? "bg-white/10 text-white shadow border-white/10"
+                : "bg-black/25 text-white/45 hover:text-white/80 border-transparent"
+            }`}
+          >
+            <span>❄️ AC Target</span>
+          </button>
         </div>
 
         {/* Ask AI Button */}
