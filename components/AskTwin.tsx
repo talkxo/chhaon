@@ -24,9 +24,28 @@ export function blockContext(b: Block) {
 }
 
 export function cityContext(blocks: Block[]) {
-  const top = priorityBlocks(blocks, 5).map(blockContext).join("\n");
+  // Group all blocks by area to summarize the entire city
+  const areaGroups = new Map<string, { lsts: number[]; densities: number[]; canopies: number[] }>();
+  for (const b of blocks) {
+    if (!areaGroups.has(b.area)) {
+      areaGroups.set(b.area, { lsts: [], densities: [], canopies: [] });
+    }
+    const g = areaGroups.get(b.area)!;
+    g.lsts.push(b.lst);
+    g.densities.push(b.density);
+    g.canopies.push(b.canopy);
+  }
+
+  // Generate short summaries for every area in Gurugram
+  const areaSummaries = [...areaGroups.entries()].map(([name, g]) => {
+    const avgLst = g.lsts.reduce((a, b) => a + b, 0) / g.lsts.length;
+    const avgDens = g.densities.reduce((a, b) => a + b, 0) / g.densities.length;
+    const avgCan = g.canopies.reduce((a, b) => a + b, 0) / g.canopies.length;
+    return `- ${name}: Avg LST ${avgLst.toFixed(1)}°C, Built Density ${Math.round(avgDens * 100)}%, Canopy Shade ${Math.round(avgCan * 100)}% (${g.lsts.length} blocks)`;
+  }).join("\n");
+
   const avg = blocks.reduce((s, b) => s + b.lst, 0) / blocks.length;
-  return `Gurugram twin: ${blocks.length} blocks, city-average LST ${avg.toFixed(1)}°C.\nFive hottest blocks:\n${top}`;
+  return `Gurugram Microclimate Twin Dataset Overview:\n- Total Blocks in Database: ${blocks.length}\n- City-wide Average LST: ${avg.toFixed(1)}°C\n\nLocality Averages:\n${areaSummaries}`;
 }
 
 export async function askGroq(messages: Msg[], context: string): Promise<string> {
@@ -165,12 +184,20 @@ export default function AskTwin({
   blocks,
   selected,
   seed,
+  weather,
 }: {
   open: boolean;
   onClose: () => void;
   blocks: Block[];
   selected: Block | null;
   seed: Msg[] | null;
+  weather: {
+    temperature: number;
+    humidity: number;
+    apparentTemp: number;
+    windSpeed: number;
+    weatherCode: number;
+  };
 }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -184,7 +211,8 @@ export default function AskTwin({
     setError(null);
     setBusy(true);
     try {
-      const context = selected ? `${cityContext(blocks)}\n\nUser is inspecting:\n${blockContext(selected)}` : cityContext(blocks);
+      const weatherContext = `Live Gurugram City Weather: Air Temperature ${weather.temperature.toFixed(1)}°C, Apparent Feels-Like ${weather.apparentTemp.toFixed(1)}°C, Relative Humidity ${weather.humidity}%, Wind Speed ${weather.windSpeed} km/h.`;
+      const context = `${cityContext(blocks)}\n\n${weatherContext}\n\n${selected ? `User is inspecting:\n${blockContext(selected)}` : ""}`;
       const reply = await askGroq(next, context);
       setMsgs([...next, { role: "assistant", content: reply }]);
     } catch (e) {

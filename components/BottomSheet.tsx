@@ -35,6 +35,13 @@ type Props = {
   viewMode: 'temp' | 'ac_noon' | 'ac_night';
   floorLevel: FloorLevel;
   onFloorLevelChange: (f: FloorLevel) => void;
+  weather: {
+    temperature: number;
+    humidity: number;
+    apparentTemp: number;
+    windSpeed: number;
+    weatherCode: number;
+  };
 };
 
 // ── Nominatim geocoding ───────────────────────────────────────────────────────
@@ -306,7 +313,7 @@ function MapSearch({ onFlyTo, blockSearch, onBlockSearch }: {
   );
 }
 
-export default function Sidebar({ blocks, selected, onSelect, onBrief, briefLoading, onFlyTo, viewMode, floorLevel, onFloorLevelChange }: Props) {
+export default function Sidebar({ blocks, selected, onSelect, onBrief, briefLoading, onFlyTo, viewMode, floorLevel, onFloorLevelChange, weather }: Props) {
   const [blockSearch, setBlockSearch] = useState("");
 
   // ── All blocks grouped by area, sorted by heat ───────────────────────────
@@ -337,23 +344,84 @@ export default function Sidebar({ blocks, selected, onSelect, onBrief, briefLoad
     [selected],
   );
 
+  // ── AI Rationale generator for the inline explanation box ─────────────────
+  type AIRationale = { summary: string; savings?: string; stress?: string };
+  const [rationale, setRationale] = useState<AIRationale | null>(null);
+  const [rationaleLoading, setRationaleLoading] = useState(false);
+
+  useEffect(() => {
+    if (!selected || viewMode === 'temp') {
+      setRationale(null);
+      return;
+    }
+
+    let active = true;
+    setRationaleLoading(true);
+    setRationale(null);
+
+    const timeOfDay = viewMode === 'ac_noon' ? 'Noon' : 'Night';
+    const setpoint = viewMode === 'ac_noon' ? getNoonAC(selected, floorLevel) : getNightAC(selected, floorLevel);
+
+    const context = `Block ${selected.name} (${selected.area}): LST ${selected.lst.toFixed(1)}°C, density ${Math.round(selected.density * 100)}%, canopy ${Math.round(selected.canopy * 100)}%, traffic ${Math.round(selected.traffic * 100)}%, floor level ${floorLevel}. Live City Weather: Air Temp ${weather.temperature.toFixed(1)}°C, Feels-like ${weather.apparentTemp.toFixed(1)}°C, Humidity ${weather.humidity}%, Wind ${weather.windSpeed} km/h.`;
+    const prompt = `Analyze this block. Return a JSON object with keys:
+    - "summary": 1-2 sentence explanation of why the recommended AC temperature is ${setpoint}°C at ${timeOfDay}. Take into account the live conditions: air temp ${weather.temperature.toFixed(1)}°C, feels-like ${weather.apparentTemp.toFixed(1)}°C, relative humidity ${weather.humidity}%, and wind speed ${weather.windSpeed} km/h (specifically explaining how the humidity of ${weather.humidity}% or wind speed of ${weather.windSpeed} km/h changes the comfort or AC strain in this block).
+    - "savings": Energy savings calculation (1 sentence, e.g. "Saves up to X% electricity compared to a baseline of 22°C").
+    - "stress": Localized stress description (1 sentence, detailing combined load on grid capacity, compressor strain, and home electrical wiring safety).
+    Do not wrap in markdown tags.`;
+
+    fetch("/api/rationale", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        prompt,
+        context
+      })
+    })
+    .then(res => res.json())
+    .then(data => {
+      if (!active) return;
+      try {
+        const parsed = JSON.parse(data.reply) as AIRationale;
+        setRationale(parsed);
+      } catch {
+        setRationale({
+          summary: data.reply,
+          savings: "Calculated based on microclimate properties.",
+          stress: `Moderate pressure on local grid and compressor cooling cycles.`
+        });
+      }
+    })
+    .catch(() => {
+      if (active) setRationale({
+        summary: "Failed to generate microclimate context from the digital twin.",
+        savings: "Unable to calculate.",
+        stress: "Unable to calculate."
+      });
+    })
+    .finally(() => {
+      if (active) setRationaleLoading(false);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [selected?.id, viewMode, floorLevel, weather.temperature, weather.humidity, weather.apparentTemp, weather.windSpeed]);
+
   return (
     <motion.aside
-      initial={{ x: -340, opacity: 0 }}
-      animate={{ x: 0, opacity: 1 }}
-      transition={{ duration: 0.6, ease: EASE }}
-      className="pointer-events-auto fixed left-0 top-0 bottom-0 z-20 flex flex-col"
-      style={{ width: 320 }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.4 }}
+      className="pointer-events-auto fixed left-0 right-0 bottom-0 md:top-0 md:right-auto md:w-[320px] z-20 flex flex-col h-[42dvh] md:h-screen transition-all duration-300"
     >
       {/* Glass panel */}
       <div
-        className="flex flex-col h-full"
+        className="flex flex-col h-full border-t md:border-t-0 md:border-r border-white/10 rounded-t-2xl md:rounded-t-0 overflow-hidden"
         style={{
           background: "linear-gradient(180deg, rgba(12,15,30,0.93) 0%, rgba(8,10,22,0.97) 100%)",
           backdropFilter: "blur(24px)",
           WebkitBackdropFilter: "blur(24px)",
-          borderRight: "1px solid rgba(255,255,255,0.08)",
-          boxShadow: "4px 0 32px rgba(0,0,0,0.55)",
+          boxShadow: "0 -4px 32px rgba(0,0,0,0.4), 4px 0 32px rgba(0,0,0,0.55)",
         }}
       >
         {/* ── Header ─────────────────────────────────────────────────────── */}
@@ -449,71 +517,106 @@ export default function Sidebar({ blocks, selected, onSelect, onBrief, briefLoad
                   <Vital label="Canopy" value={`${Math.round(selected.canopy * 100)}%`} />
                 </div>
 
-                {/* Micro-explanation for AC recommendation logic */}
+                {/* Micro-explanation for AC recommendation logic (AI Generated) */}
                 {viewMode !== 'temp' && (() => {
                   const setpoint = viewMode === 'ac_noon' ? getNoonAC(selected, floorLevel) : getNightAC(selected, floorLevel);
-                  // Calculate energy saving relative to a standard 22°C baseline
+                  // Dynamic savings: 6% per degree saved vs 22°C baseline
                   const pctSaved = (setpoint - 22) * 6;
-                  
-                  const isTopFloor = floorLevel === '5+';
-                  const isLowFloor = floorLevel === '1-2';
-                  
-                  // Construct block-specific microclimate context
-                  let microclimateExplanation = "";
-                  if (selected.density >= 0.75) {
-                    microclimateExplanation += `High built density (${Math.round(selected.density * 100)}%) traps heat in concrete. `;
-                  } else {
-                    microclimateExplanation += `Low built density (${Math.round(selected.density * 100)}%) allows better airflow. `;
-                  }
-                  
-                  if (selected.canopy <= 0.15) {
-                    microclimateExplanation += `Near-zero tree canopy (${Math.round(selected.canopy * 100)}%) offers no solar shade, `;
-                  } else {
-                    microclimateExplanation += `Healthy tree canopy (${Math.round(selected.canopy * 100)}%) helps dissipate surface heat, `;
-                  }
-                  
-                  if (selected.traffic >= 0.7) {
-                    microclimateExplanation += `and high traffic congestion contributes heavily to local air heating.`;
-                  } else {
-                    microclimateExplanation += `with minimal waste heat from vehicle traffic.`;
-                  }
-
-                  let floorEffectText = "";
-                  if (isLowFloor) {
-                    floorEffectText = "Lower floor levels (1-2) benefit from natural tree-level shading, reducing indoor temperatures by up to -1.2°C.";
-                  } else if (isTopFloor) {
-                    floorEffectText = "At the 5+ floor level, the roof acts as a solar radiator, adding +1.8°C of direct heat load directly into your rooms.";
-                  } else {
-                    floorEffectText = "Mid floor levels (3-4) represent standard urban exposure, above tree line but below direct roof solar radiation.";
-                  }
 
                   return (
                     <div className="rounded-xl bg-blue-500/5 border border-blue-500/10 p-3 mb-3 text-[10.5px] leading-relaxed text-blue-200">
-                      <div className="font-semibold mb-1.5 flex items-center gap-1.5 text-xs text-blue-300">
-                        <span>💡</span> Block Setpoint Rationale
+                      <div className="font-semibold mb-1.5 flex items-center justify-between text-xs text-blue-300">
+                        <span className="flex items-center gap-1.5 font-display tracking-wide uppercase text-[10px]">
+                          <span>✦</span> AI Climate Rationale
+                        </span>
+                        {rationaleLoading && (
+                          <span className="animate-pulse text-[9px] text-blue-400 font-normal">Analyzing twin...</span>
+                        )}
                       </div>
+
                       <div className="space-y-2">
-                        <p>
-                          Recommended AC setpoint is{" "}
-                          <strong className="text-white font-bold">{setpoint}°C</strong> (LST is {selected.lst.toFixed(1)}°C).
-                        </p>
-                        <p className="text-white/70 italic bg-white/[0.03] p-1.5 rounded-lg border border-white/5">
-                          {microclimateExplanation}
-                        </p>
-                        <p className="text-white/70">
-                          {floorEffectText}
-                        </p>
-                        <ul className="space-y-1 pl-3 list-disc text-white/70">
-                          <li>
-                            <strong className="text-white font-semibold">Savings:</strong> Reduces power consumption by{" "}
-                            <strong className="text-white font-bold">{pctSaved}%</strong> compared to a baseline of 22°C.
-                          </li>
-                          <li>
-                            <strong className="text-white font-semibold">Grid Impact:</strong> {setpoint >= 26 
-                              ? "Critical heat zone. Setting AC here to 26-27°C prevents local Cyber City transformer failure." 
-                              : "Eco-comfort zone. Minimal stress on the local power substation."}
-                          </li>
-                        </ul>
+                        {rationaleLoading ? (
+                          <div className="space-y-1.5 py-1">
+                            <div className="h-3 w-full bg-blue-500/10 rounded animate-pulse" />
+                            <div className="h-3 w-5/6 bg-blue-500/10 rounded animate-pulse" />
+                          </div>
+                        ) : rationale ? (
+                          <p className="text-white/85 bg-white/[0.02] p-2 rounded-lg border border-white/5 font-medium leading-normal">
+                            {rationale.summary}
+                          </p>
+                        ) : (
+                          <p className="text-white/60">Failed to load real-time microclimate rationale.</p>
+                        )}
+
+                        {/* Visual Widgets Grid */}
+                        <div className="grid grid-cols-2 gap-2 mt-2 pt-1.5 border-t border-white/5">
+                          {/* Energy Saving Widget */}
+                          <div className="rounded-lg bg-white/[0.02] p-2 border border-white/5 flex flex-col justify-between">
+                            <div>
+                              <span className="text-[8.5px] uppercase tracking-wider text-white/35 block mb-0.5">Energy Saving</span>
+                              <span className="text-sm font-bold text-green-400">+{pctSaved}%</span>
+                              <span className="text-[8px] text-white/40 block">vs 22°C baseline</span>
+                            </div>
+                            <div className="w-full bg-white/10 h-1 rounded-full overflow-hidden mt-1.5">
+                              <div 
+                                className="bg-green-400 h-full rounded-full transition-all duration-300"
+                                style={{ width: `${Math.min(100, (pctSaved / 30) * 100)}%` }}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Stress Level Widget */}
+                          <div className="rounded-lg bg-white/[0.02] p-2 border border-white/5 flex flex-col justify-between">
+                            {(() => {
+                              // Dynamic Stress Score calculation: 
+                              // Built Density, Shading Canopy cover, Traffic and Floor Level directly drive the score
+                              const stressVal = Math.min(100, Math.round(
+                                (selected.lst - 30) * 3.5 + 
+                                selected.density * 22 + 
+                                selected.traffic * 16 + 
+                                (floorLevel === '5+' ? 15 : 0)
+                              ));
+                              let stressLabel = "Low";
+                              let stressColor = "text-green-400 bg-green-500/10 border-green-500/20";
+                              let barColor = "bg-green-400";
+                              
+                              if (stressVal >= 80) {
+                                stressLabel = "Critical";
+                                stressColor = "text-red-400 bg-red-500/10 border-red-500/20";
+                                barColor = "bg-red-500";
+                              } else if (stressVal >= 55) {
+                                stressLabel = "High";
+                                stressColor = "text-amber-400 bg-amber-500/10 border-amber-500/20";
+                                barColor = "bg-amber-500";
+                              } else if (stressVal >= 30) {
+                                stressLabel = "Moderate";
+                                stressColor = "text-blue-400 bg-blue-500/10 border-blue-500/20";
+                                barColor = "bg-blue-400";
+                              }
+
+                              return (
+                                <>
+                                  <div>
+                                    <span className="text-[8.5px] uppercase tracking-wider text-white/35 block mb-0.5">AC & Grid Stress</span>
+                                    <div className="flex items-center gap-1">
+                                      <span className={`text-[8.5px] font-bold px-1 py-0.2 rounded border ${stressColor}`}>
+                                        {stressLabel}
+                                      </span>
+                                      <span className="text-[10px] text-white/60 font-semibold">{stressVal}/100</span>
+                                    </div>
+                                  </div>
+                                  <div className="w-full bg-white/10 h-1 rounded-full overflow-hidden mt-1.5">
+                                    <div 
+                                      className={`${barColor} h-full rounded-full transition-all duration-300`}
+                                      style={{ width: `${stressVal}%` }}
+                                    />
+                                  </div>
+                                </>
+                              );
+                            })()}
+                          </div>
+                        </div>
+
                       </div>
                     </div>
                   );

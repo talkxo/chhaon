@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Block, generateBlocks, FloorLevel } from "@/lib/model";
 import Sidebar, { type FlyTarget } from "@/components/BottomSheet";
@@ -26,7 +26,41 @@ const MapView = dynamic(() => import("@/components/MapView"), {
 type Msg = { role: "user" | "assistant"; content: string };
 
 export default function Home() {
-  const blocks = useMemo(() => generateBlocks(), []);
+  const [weather, setWeather] = useState({
+    temperature: 40.5,
+    humidity: 35,
+    apparentTemp: 43.5,
+    windSpeed: 10,
+    weatherCode: 0,
+  });
+  const [weatherLoading, setWeatherLoading] = useState(true);
+
+  // Fetch live weather baseline for Gurugram from our API
+  useEffect(() => {
+    let active = true;
+    fetch("/api/weather")
+      .then((res) => res.json())
+      .then((data) => {
+        if (active && typeof data.temperature === "number") {
+          setWeather({
+            temperature: data.temperature ?? 40.5,
+            humidity: data.humidity ?? 35,
+            apparentTemp: data.apparentTemp ?? data.temperature ?? 43.5,
+            windSpeed: data.windSpeed ?? 10,
+            weatherCode: data.weatherCode ?? 0,
+          });
+        }
+      })
+      .catch((err) => console.error("Failed to load live Gurugram weather:", err))
+      .finally(() => {
+        if (active) setWeatherLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const blocks = useMemo(() => generateBlocks(weather.temperature, weather.humidity), [weather.temperature, weather.humidity]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [askOpen, setAskOpen] = useState(false);
   const [seed, setSeed] = useState<Msg[] | null>(null);
@@ -84,11 +118,13 @@ export default function Home() {
         viewMode={viewMode}
         floorLevel={floorLevel}
         onFloorLevelChange={setFloorLevel}
+        weather={weather}
       />
 
       {/* TopBar — floats top-right, leaves sidebar gap */}
       <TopBar 
         blocks={blocks} 
+        weather={weather}
         onAsk={() => { setSeed(null); setAskOpen(true); }}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
@@ -100,6 +136,7 @@ export default function Home() {
         blocks={blocks}
         selected={selected}
         seed={seed}
+        weather={weather}
       />
     </main>
   );

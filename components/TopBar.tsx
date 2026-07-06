@@ -17,11 +17,19 @@ function AnimatedNumber({ value, decimals = 1 }: { value: number; decimals?: num
 
 export default function TopBar({
   blocks,
+  weather,
   onAsk,
   viewMode,
   onViewModeChange,
 }: {
   blocks: Block[];
+  weather: {
+    temperature: number;
+    humidity: number;
+    apparentTemp: number;
+    windSpeed: number;
+    weatherCode: number;
+  };
   onAsk: () => void;
   viewMode: "temp" | "ac_noon" | "ac_night";
   onViewModeChange: (m: "temp" | "ac_noon" | "ac_night") => void;
@@ -29,9 +37,9 @@ export default function TopBar({
   const stats = cityStats(blocks);
   
   const modes: { id: typeof viewMode; label: string }[] = [
-    { id: "temp", label: "🌡 Temperature" },
-    { id: "ac_noon", label: "☀️ Noon AC" },
-    { id: "ac_night", label: "🌙 Night AC" },
+    { id: "temp", label: "🌡 LST" },
+    { id: "ac_noon", label: "☀️ Noon" },
+    { id: "ac_night", label: "🌙 Night" },
   ];
 
   return (
@@ -39,12 +47,17 @@ export default function TopBar({
       initial={{ y: -70, opacity: 0 }}
       animate={{ y: 0, opacity: 1 }}
       transition={{ duration: 0.7, ease: EASE }}
-      className="pointer-events-auto fixed top-0 right-0 z-20 px-3 pt-3"
-      style={{ left: 320 }}
+      className="pointer-events-auto fixed top-0 right-0 z-20 px-2 pt-2 md:px-3 md:pt-3 left-0 md:left-[320px] transition-all duration-300"
     >
-      <div className="glass flex items-center justify-between gap-4 rounded-2xl px-4 py-2.5">
+      <div className="glass flex items-center justify-between gap-2 md:gap-4 rounded-2xl px-3 py-2 md:px-4 md:py-2.5">
         {/* City Stats */}
-        <div className="min-w-0 flex gap-4 text-[10px] text-white/55 font-medium">
+        <div className="min-w-0 flex items-center gap-2 md:gap-3 text-[9px] md:text-[10px] text-white/55 font-medium">
+          <div className="flex items-center gap-1.5 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-lg text-emerald-400">
+            <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="font-bold">LIVE: {weather.temperature.toFixed(0)}°</span>
+            <span className="hidden sm:inline opacity-75">| Feels {weather.apparentTemp.toFixed(0)}°</span>
+            <span className="hidden md:inline opacity-75">| 💧 {weather.humidity}%</span>
+          </div>
           <span>
             AVG{" "}
             <span className="font-semibold text-amber-300">
@@ -60,14 +73,14 @@ export default function TopBar({
         </div>
 
         {/* Dynamic Layer Switcher Pills */}
-        <div className="flex bg-black/35 rounded-xl p-1 border border-white/5">
+        <div className="flex bg-black/35 rounded-xl p-0.5 md:p-1 border border-white/5">
           {modes.map((m) => {
             const active = viewMode === m.id;
             return (
               <button
                 key={m.id}
                 onClick={() => onViewModeChange(m.id)}
-                className={`px-3 py-1.5 rounded-lg text-[10px] font-bold tracking-wider uppercase transition-all duration-300 cursor-pointer ${
+                className={`px-2 py-1 md:px-3 md:py-1.5 rounded-lg text-[9px] md:text-[10px] font-bold tracking-wider uppercase transition-all duration-300 cursor-pointer ${
                   active
                     ? "bg-white/10 text-white shadow-md border border-white/10"
                     : "text-white/45 hover:text-white/80 border border-transparent"

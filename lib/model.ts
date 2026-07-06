@@ -82,21 +82,36 @@ const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v
 
 // LST from proxies. Calibrated to a hot Gurugram afternoon (April–June):
 // dense concrete cores push past 45°C while the Aravalli edge sits near 34°C.
-function computeLST(b: Pick<Block, "density" | "ndvi" | "albedo" | "canopy" | "traffic">, noise: number) {
-  return (
-    36.5 +
-    7.5 * b.density +
-    3.0 * b.traffic -
-    6.0 * b.ndvi -
+function computeLST(
+  b: Pick<Block, "density" | "ndvi" | "albedo" | "canopy" | "traffic">, 
+  baseTemp: number, 
+  humidity: number,
+  noise: number
+) {
+  const cleanTemp = typeof baseTemp === "number" && !isNaN(baseTemp) ? baseTemp : 40.5;
+  const cleanHum = typeof humidity === "number" && !isNaN(humidity) ? humidity : 35;
+
+  // Evapotranspiration cooling limits: higher relative humidity blocks plants/trees from 
+  // transpiring moisture effectively, reducing their natural cooling capabilities.
+  const evapFactor = Math.max(0.3, 1.0 - Math.max(0, cleanHum - 25) / 90);
+
+  const uhi = (
+    8.5 * b.density +
+    3.2 * b.traffic -
+    (6.2 * evapFactor) * b.ndvi -
     9.0 * (b.albedo - 0.2) -
-    3.5 * b.canopy +
-    noise
+    (3.8 * evapFactor) * b.canopy
   );
+  return cleanTemp + uhi + noise;
 }
 
-const LST_MIN = 33;
-const LST_MAX = 47;
-export const scoreFromLST = (lst: number) => clamp(((lst - LST_MIN) / (LST_MAX - LST_MIN)) * 100, 0, 100);
+export const scoreFromLST = (lst: number, baseTemp = 40.5) => {
+  const cleanBase = typeof baseTemp === "number" && !isNaN(baseTemp) ? baseTemp : 40.5;
+  const min = cleanBase - 7.5;
+  const max = cleanBase + 6.5;
+  const cleanLst = typeof lst === "number" && !isNaN(lst) ? lst : cleanBase;
+  return clamp(((cleanLst - min) / (max - min)) * 100, 0, 100);
+};
 
 // ---- Hex grid generation ----
 
@@ -116,9 +131,15 @@ function hexPolygon(cx: number, cy: number): [number, number][] {
 }
 
 let cachedBlocks: Block[] | null = null;
+let cachedBaseTemp: number | null = null;
+let cachedHumidity: number | null = null;
 
-export function generateBlocks(): Block[] {
-  if (cachedBlocks) return cachedBlocks;
+export function generateBlocks(baseTemp = 40.5, humidity = 35): Block[] {
+  const cleanTemp = typeof baseTemp === "number" && !isNaN(baseTemp) ? baseTemp : 40.5;
+  const cleanHum = typeof humidity === "number" && !isNaN(humidity) ? humidity : 35;
+
+  if (cachedBlocks && cachedBaseTemp === cleanTemp && cachedHumidity === cleanHum) return cachedBlocks;
+  
   const blocks: Block[] = [];
   const dx = 1.5 * R_LNG;
   const dy = Math.sqrt(3) * R_LAT;
@@ -160,7 +181,7 @@ export function generateBlocks(): Block[] {
         canopy: clamp(mix(canopy, RURAL.canopy) + (rand() - 0.5) * 0.08, 0.02, 0.9),
         traffic: clamp(mix(traffic, RURAL.traffic) + (rand() - 0.5) * 0.1, 0.02, 1),
       };
-      const lst = clamp(computeLST(block, (rand() - 0.5) * 1.2), LST_MIN, LST_MAX);
+      const lst = clamp(computeLST(block, cleanTemp, cleanHum, (rand() - 0.5) * 1.2), cleanTemp - 8, cleanTemp + 8);
 
       // Skip far-fringe hexes to give the city an organic footprint
       if (urban < 0.12 && rand() < 0.75) continue;
@@ -174,11 +195,13 @@ export function generateBlocks(): Block[] {
         polygon: hexPolygon(lng, lat),
         ...block,
         lst,
-        score: scoreFromLST(lst),
+        score: scoreFromLST(lst, cleanTemp),
       });
     }
   }
   cachedBlocks = blocks;
+  cachedBaseTemp = cleanTemp;
+  cachedHumidity = cleanHum;
   return blocks;
 }
 
