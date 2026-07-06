@@ -1,12 +1,23 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Block, priorityBlocks } from "@/lib/model";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
 type Msg = { role: "user" | "assistant"; content: string };
+
+type AssistantJSON = {
+  summary: string;
+  vitals?: { label: string; value: string; level?: "success" | "warning" | "danger" | "info" }[];
+  chart?: {
+    title: string;
+    series: { label: string; value: number; color?: string }[];
+  };
+  actions?: string[];
+  notes?: string;
+};
 
 export function blockContext(b: Block) {
   return `Block ${b.name} (${b.area}): LST ${b.lst.toFixed(1)}°C, heat score ${Math.round(b.score)}/100, density ${b.density.toFixed(2)}, NDVI ${b.ndvi.toFixed(2)}, albedo ${b.albedo.toFixed(2)}, canopy ${b.canopy.toFixed(2)}, traffic ${b.traffic.toFixed(2)}`;
@@ -19,10 +30,9 @@ export function cityContext(blocks: Block[]) {
 }
 
 export async function askGroq(messages: Msg[], context: string): Promise<string> {
-  const key = typeof window !== "undefined" ? localStorage.getItem("groq_key") : null;
   const res = await fetch("/api/ask", {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...(key ? { "x-groq-key": key } : {}) },
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ messages, context }),
   });
   const data = await res.json();
@@ -35,6 +45,119 @@ const SUGGESTIONS = [
   "Cheapest way to cool Old Gurugram?",
   "What happens on a +1°C heatwave day?",
 ];
+
+// Rich interactive assistant card to render structured microclimate briefs
+function AssistantCard({ jsonStr }: { jsonStr: string }) {
+  const parsed = useMemo(() => {
+    try {
+      // Find the first '{' and last '}' to strip any potential markdown wraps
+      const start = jsonStr.indexOf("{");
+      const end = jsonStr.lastIndexOf("}");
+      if (start !== -1 && end !== -1) {
+        const clean = jsonStr.substring(start, end + 1);
+        return JSON.parse(clean) as AssistantJSON;
+      }
+      return JSON.parse(jsonStr) as AssistantJSON;
+    } catch {
+      return null;
+    }
+  }, [jsonStr]);
+
+  // Fallback to raw text if parsing fails
+  if (!parsed) {
+    return <div className="text-white/95 text-sm leading-relaxed whitespace-pre-wrap">{jsonStr}</div>;
+  }
+
+  const { summary, vitals, chart, actions, notes } = parsed;
+
+  return (
+    <div className="space-y-4">
+      {/* Narrative summary */}
+      <p className="text-sm leading-relaxed text-white/90 font-medium">
+        {summary}
+      </p>
+
+      {/* Interactive Vitals Grid */}
+      {vitals && vitals.length > 0 && (
+        <div className="grid grid-cols-2 gap-2">
+          {vitals.map((v, idx) => {
+            let badgeBg = "bg-blue-500/10 border-blue-500/20 text-blue-300";
+            if (v.level === "danger") badgeBg = "bg-red-500/10 border-red-500/20 text-red-300";
+            if (v.level === "warning") badgeBg = "bg-yellow-500/10 border-yellow-500/20 text-yellow-300";
+            if (v.level === "success") badgeBg = "bg-emerald-500/10 border-emerald-500/20 text-emerald-300";
+
+            return (
+              <div key={idx} className={`rounded-xl border px-3 py-2.5 ${badgeBg}`}>
+                <div className="text-[10px] uppercase tracking-wider opacity-60">{v.label}</div>
+                <div className="font-display text-sm font-bold mt-0.5">{v.value}</div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Styled Interactive Chart */}
+      {chart && chart.series && chart.series.length > 0 && (
+        <div className="rounded-xl bg-white/[0.04] border border-white/[0.08] p-3">
+          <h4 className="text-[10px] uppercase tracking-wider text-white/40 mb-3 font-semibold">
+            📊 {chart.title}
+          </h4>
+          <div className="space-y-2">
+            {chart.series.map((s, idx) => {
+              const maxVal = Math.max(...chart.series.map((item) => item.value), 1);
+              const percentage = (s.value / maxVal) * 100;
+              const barColor = s.color || "#3b82f6";
+
+              return (
+                <div key={idx} className="space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-white/60">{s.label}</span>
+                    <span className="font-semibold" style={{ color: barColor }}>{s.value}</span>
+                  </div>
+                  <div className="h-2 rounded-full bg-white/10 overflow-hidden relative">
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{ width: `${percentage}%` }}
+                      transition={{ duration: 0.8, ease: EASE, delay: idx * 0.1 }}
+                      className="h-full rounded-full"
+                      style={{ backgroundColor: barColor }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Actions Checklist */}
+      {actions && actions.length > 0 && (
+        <div className="space-y-2">
+          <h4 className="text-[10px] uppercase tracking-wider text-white/40 font-semibold">
+            ⚡ Recommended Actions
+          </h4>
+          <div className="space-y-1.5">
+            {actions.map((act, idx) => (
+              <div key={idx} className="flex gap-2.5 items-start text-xs text-white/80">
+                <span className="flex-none text-emerald-400 mt-0.5 font-bold">✓</span>
+                <span className="leading-normal">{act}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Notes footer */}
+      {notes && (
+        <p className="text-[10px] text-white/35 italic leading-normal border-t border-white/[0.05] pt-2">
+          💡 {notes}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// Simple wrapper to run on assistant messages
 
 export default function AskTwin({
   open,
@@ -53,7 +176,6 @@ export default function AskTwin({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [keyDraft, setKeyDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const seenSeed = useRef<Msg[] | null>(null);
 
@@ -72,8 +194,6 @@ export default function AskTwin({
     }
   };
 
-  // A "seed" conversation is pushed in when the user taps "AI brief" on a
-  // block — if it ends on a user turn, fire the completion immediately.
   useEffect(() => {
     if (!seed || seenSeed.current === seed) return;
     seenSeed.current = seed;
@@ -91,8 +211,6 @@ export default function AskTwin({
     setInput("");
     await complete([...msgs, { role: "user", content: text.trim() }]);
   };
-
-  const needsKey = error?.includes("console.groq.com");
 
   return (
     <AnimatePresence>
@@ -115,16 +233,19 @@ export default function AskTwin({
             <div className="flex items-center justify-between px-5 pb-2 pt-4">
               <div>
                 <h2 className="font-display text-lg font-bold text-white">Ask the Twin</h2>
-                <p className="text-[11px] text-white/45">
-                  Groq · llama-3.3-70b {selected ? `· focused on ${selected.name}` : "· city-wide"}
+                <p className="text-[11px] text-white/45 font-medium">
+                  {selected ? `Focused on ${selected.name}` : "City-wide search active"}
                 </p>
               </div>
-              <button onClick={onClose} className="rounded-full bg-white/10 px-3 py-1.5 text-xs text-white/70">
+              <button 
+                onClick={onClose} 
+                className="rounded-full bg-white/10 px-3 py-1.5 text-xs text-white/70 hover:bg-white/20 transition"
+              >
                 ✕
               </button>
             </div>
 
-            <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto px-5 py-3">
+            <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto px-5 py-3">
               {msgs.length === 0 && (
                 <div className="space-y-2 pt-6">
                   <p className="text-center text-sm text-white/40">Ask anything about Gurugram&apos;s heat map</p>
@@ -150,11 +271,15 @@ export default function AskTwin({
                   transition={{ duration: 0.35, ease: EASE }}
                   className={
                     m.role === "user"
-                      ? "ml-8 rounded-2xl rounded-br-md bg-gradient-to-r from-[#6b5bd2] to-[#8a5bd2] px-4 py-2.5 text-sm text-white"
-                      : "mr-4 whitespace-pre-wrap rounded-2xl rounded-bl-md bg-white/[0.07] px-4 py-2.5 text-sm leading-relaxed text-white/90"
+                      ? "ml-8 rounded-2xl rounded-br-md bg-gradient-to-r from-[#1d4ed8] to-[#1e40af] px-4 py-2.5 text-sm text-white border border-blue-500/20"
+                      : "mr-4 rounded-2xl rounded-bl-md bg-white/[0.06] border border-white/[0.07] px-4 py-3.5 text-sm leading-relaxed text-white/95"
                   }
                 >
-                  {m.content}
+                  {m.role === "user" ? (
+                    m.content
+                  ) : (
+                    <AssistantCard jsonStr={m.content} />
+                  )}
                 </motion.div>
               ))}
               {busy && (
@@ -169,36 +294,7 @@ export default function AskTwin({
                   ))}
                 </div>
               )}
-              {error && !needsKey && <p className="text-xs text-rose-300">{error}</p>}
-              {needsKey && (
-                <div className="rounded-xl border border-amber-300/25 bg-amber-300/10 p-3 text-xs text-amber-100">
-                  <p className="mb-2">
-                    No Groq key found. Grab a free one at{" "}
-                    <a href="https://console.groq.com" target="_blank" rel="noreferrer" className="underline">
-                      console.groq.com
-                    </a>{" "}
-                    and paste it here (stored only in your browser):
-                  </p>
-                  <div className="flex gap-2">
-                    <input
-                      value={keyDraft}
-                      onChange={(e) => setKeyDraft(e.target.value)}
-                      placeholder="gsk_…"
-                      className="min-w-0 flex-1 rounded-lg bg-black/30 px-3 py-2 text-white outline-none placeholder:text-white/30"
-                    />
-                    <button
-                      onClick={() => {
-                        localStorage.setItem("groq_key", keyDraft.trim());
-                        setError(null);
-                        setKeyDraft("");
-                      }}
-                      className="rounded-lg bg-amber-300/20 px-3 py-2 font-semibold text-amber-100"
-                    >
-                      Save
-                    </button>
-                  </div>
-                </div>
-              )}
+              {error && <p className="text-xs text-rose-300">{error}</p>}
             </div>
 
             <div className="flex gap-2 px-5 pb-6 pt-2">
@@ -207,12 +303,12 @@ export default function AskTwin({
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && send(input)}
                 placeholder="Ask the twin…"
-                className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-white/25"
+                className="min-w-0 flex-1 rounded-2xl border border-white/10 bg-white/[0.06] px-4 py-3 text-sm text-white outline-none placeholder:text-white/30 focus:border-white/25 focus:bg-white/[0.09] transition-all"
               />
               <button
                 onClick={() => send(input)}
                 disabled={busy || !input.trim()}
-                className="rounded-2xl bg-gradient-to-r from-[#e85d8a] to-[#f9a03f] px-4 py-3 text-sm font-bold text-white disabled:opacity-40"
+                className="rounded-2xl bg-gradient-to-r from-[#1d4ed8] to-[#22c55e] px-4 py-3 text-sm font-bold text-white disabled:opacity-40 hover:brightness-110 active:scale-95 transition-all"
               >
                 ↑
               </button>
