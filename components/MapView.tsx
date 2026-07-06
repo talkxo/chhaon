@@ -13,9 +13,9 @@ import type { FlyTarget } from "./BottomSheet";
 const BASEMAP = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 
 const INITIAL_VIEW: MapViewState = {
-  longitude: 77.058,
-  latitude: 28.462,
-  zoom: 11.8,
+  longitude: 77.035,
+  latitude: 28.435,
+  zoom: 10.7,
   pitch: 0,     // flat overhead — fully browsable like a regular map
   bearing: 0,
 };

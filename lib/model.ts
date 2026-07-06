@@ -51,11 +51,17 @@ const LOCALITIES: Locality[] = [
   { name: "Old Gurugram", lng: 77.023, lat: 28.452, sigma: 0.013, density: 0.92, ndvi: 0.08, albedo: 0.15, canopy: 0.05, traffic: 0.85 },
   { name: "Sector 14", lng: 77.043, lat: 28.468, sigma: 0.011, density: 0.7, ndvi: 0.2, albedo: 0.2, canopy: 0.2, traffic: 0.65 },
   { name: "Palam Vihar", lng: 77.035, lat: 28.51, sigma: 0.013, density: 0.6, ndvi: 0.3, albedo: 0.25, canopy: 0.3, traffic: 0.5 },
-  { name: "Sohna Road", lng: 77.04, lat: 28.42, sigma: 0.014, density: 0.7, ndvi: 0.2, albedo: 0.22, canopy: 0.15, traffic: 0.8 },
+  { name: "Sohna Road", lng: 77.03, lat: 28.40, sigma: 0.014, density: 0.7, ndvi: 0.2, albedo: 0.22, canopy: 0.15, traffic: 0.8 },
   { name: "Aravalli Park", lng: 77.105, lat: 28.493, sigma: 0.01, density: 0.05, ndvi: 0.85, albedo: 0.28, canopy: 0.8, traffic: 0.1 },
   { name: "Sector 56", lng: 77.103, lat: 28.423, sigma: 0.012, density: 0.6, ndvi: 0.3, albedo: 0.24, canopy: 0.25, traffic: 0.55 },
   { name: "GC Extension", lng: 77.065, lat: 28.41, sigma: 0.013, density: 0.55, ndvi: 0.18, albedo: 0.3, canopy: 0.1, traffic: 0.6 },
   { name: "Sultanpur Fringe", lng: 76.99, lat: 28.46, sigma: 0.016, density: 0.25, ndvi: 0.5, albedo: 0.26, canopy: 0.35, traffic: 0.3 },
+  { name: "Manesar Core", lng: 76.935, lat: 28.36, sigma: 0.018, density: 0.82, ndvi: 0.12, albedo: 0.19, canopy: 0.07, traffic: 0.88 },
+  { name: "Dwarka Expressway", lng: 76.995, lat: 28.495, sigma: 0.016, density: 0.62, ndvi: 0.22, albedo: 0.24, canopy: 0.18, traffic: 0.68 },
+  { name: "Sector 82 (Vatika)", lng: 76.97, lat: 28.39, sigma: 0.014, density: 0.68, ndvi: 0.25, albedo: 0.22, canopy: 0.22, traffic: 0.58 },
+  { name: "Sector 45/46", lng: 77.068, lat: 28.442, sigma: 0.012, density: 0.72, ndvi: 0.24, albedo: 0.23, canopy: 0.25, traffic: 0.62 },
+  { name: "Gwal Pahari", lng: 77.135, lat: 28.435, sigma: 0.015, density: 0.52, ndvi: 0.45, albedo: 0.25, canopy: 0.42, traffic: 0.48 },
+  { name: "Sohna South", lng: 77.02, lat: 28.30, sigma: 0.02, density: 0.65, ndvi: 0.35, albedo: 0.22, canopy: 0.25, traffic: 0.58 }
 ];
 
 // Semi-rural baseline the city fades into at the edges.
@@ -94,11 +100,11 @@ export const scoreFromLST = (lst: number) => clamp(((lst - LST_MIN) / (LST_MAX -
 
 // ---- Hex grid generation ----
 
-const CENTER = { lng: 77.055, lat: 28.462 };
-const LNG_SPAN = 0.075; // ± around center
-const LAT_SPAN = 0.062;
-const R_LAT = 0.00205; // hex radius in degrees latitude (~230 m)
-const R_LNG = R_LAT / Math.cos((28.46 * Math.PI) / 180);
+const CENTER = { lng: 77.035, lat: 28.435 };
+const LNG_SPAN = 0.12; 
+const LAT_SPAN = 0.15; 
+const R_LAT = 0.0028; // hex radius in degrees latitude (~315 m)
+const R_LNG = R_LAT / Math.cos((28.435 * Math.PI) / 180);
 
 function hexPolygon(cx: number, cy: number): [number, number][] {
   const pts: [number, number][] = [];
