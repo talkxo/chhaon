@@ -1,19 +1,37 @@
 "use client";
 
-import { AnimatePresence, motion } from "framer-motion";
+import { AnimatePresence, motion, type PanInfo } from "framer-motion";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Block,
   diurnalCurve,
   heatColor,
   acColor,
+  aqiColor,
+  aqiCategory,
   NO_INTERVENTIONS,
   getAC,
   getACScore,
   FloorLevel,
+  Weather,
+  ViewMode,
 } from "@/lib/model";
 import TempCurve from "./TempCurve";
 import { AssistantCard } from "./AskTwin";
+import {
+  BHKConfig,
+  areaRentStats,
+  areaHasRentData,
+  areaSamplePins,
+  areaMatchesRentFilter,
+  areaRentForMode,
+  rentColor,
+  RENT_BHK_OPTIONS,
+} from "@/lib/rentData";
+
+function formatRent(rent: number) {
+  return rent >= 100000 ? `₹${(rent / 100000).toFixed(1)}L` : `₹${Math.round(rent / 1000)}k`;
+}
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -30,18 +48,16 @@ type Props = {
   selected: Block | null;
   onSelect: (b: Block | null) => void;
   onFlyTo: (target: FlyTarget) => void;
-  viewMode: 'temp' | 'ac';
+  viewMode: ViewMode;
   floorLevel: FloorLevel;
   onFloorLevelChange: (f: FloorLevel) => void;
-  weather: {
-    temperature: number;
-    humidity: number;
-    apparentTemp: number;
-    windSpeed: number;
-    weatherCode: number;
-  };
+  weather: Weather;
   userLocation: { longitude: number; latitude: number } | null;
   onUserLocationChange: (loc: { longitude: number; latitude: number } | null) => void;
+  rentBudget: string;
+  onRentBudgetChange: (v: string) => void;
+  rentBHK: BHKConfig | null;
+  onRentBHKChange: (v: BHKConfig | null) => void;
 };
 
 // ── Nominatim geocoding ───────────────────────────────────────────────────────
@@ -71,16 +87,38 @@ async function geocode(q: string): Promise<GeoResult[]> {
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
-function HeatBadge({ score, lst, viewMode, b, floorLevel }: { score: number; lst: number; viewMode: 'temp' | 'ac'; b: Block; floorLevel: FloorLevel }) {
-  let displayScore = score;
+function HeatBadge({
+  score,
+  lst,
+  viewMode,
+  b,
+  floorLevel,
+  rentBHK,
+}: {
+  score: number;
+  lst: number;
+  viewMode: ViewMode;
+  b: Block;
+  floorLevel: FloorLevel;
+  rentBHK: BHKConfig | null;
+}) {
   let displayVal = `${lst.toFixed(1)}°C`;
   let title = "LST";
+  let c: [number, number, number] = heatColor(score);
   if (viewMode === 'ac') {
-    displayScore = getACScore(b, floorLevel);
     displayVal = `${getAC(b, floorLevel)}°C`;
     title = "AC SETPOINT";
+    c = acColor(getACScore(b, floorLevel));
+  } else if (viewMode === 'aqi') {
+    displayVal = `${Math.round(b.aqi)}`;
+    title = aqiCategory(b.aqi);
+    c = aqiColor(b.aqi);
+  } else if (viewMode === 'rent') {
+    const rent = areaRentForMode(b.area, rentBHK) ?? 40000;
+    displayVal = `${formatRent(rent)}/mo`;
+    title = rentBHK ?? "TYPICAL RENT";
+    c = rentColor(rent);
   }
-  const c = viewMode === 'ac' ? acColor(displayScore) : heatColor(displayScore);
   const color = `rgb(${c.join(",")})`;
   return (
     <div
@@ -125,10 +163,84 @@ function HeatBar({ score }: { score: number }) {
   );
 }
 
-function BlockRow({ b, index, onSelect, viewMode, floorLevel }: { b: Block; index: number; onSelect: (b: Block) => void; viewMode: 'temp' | 'ac'; floorLevel: FloorLevel }) {
+function BlockRow({
+  b,
+  index,
+  onSelect,
+  viewMode,
+  floorLevel,
+  rentBHK,
+}: {
+  b: Block;
+  index: number;
+  onSelect: (b: Block) => void;
+  viewMode: ViewMode;
+  floorLevel: FloorLevel;
+  rentBHK: BHKConfig | null;
+}) {
   const score = b.score;
   const label = `${b.lst.toFixed(1)}°`;
-  
+
+  if (viewMode === 'rent') {
+    const rent = areaRentForMode(b.area, rentBHK) ?? 40000;
+    const rgb = rentColor(rent);
+    const cssRgb = `rgb(${rgb.join(",")})`;
+    const pct = Math.min(100, Math.max(4, (rent / 100000) * 100));
+    return (
+      <motion.button
+        key={b.id}
+        initial={{ opacity: 0, x: -10 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.25, ease: EASE, delay: Math.min(index * 0.02, 0.35) }}
+        onClick={() => onSelect(b)}
+        className="flex w-full items-center gap-2.5 rounded-xl bg-white/[0.04] px-2.5 py-2 text-left transition hover:bg-white/[0.09] active:scale-[0.99]"
+      >
+        <span className="h-7 w-1 flex-none rounded-full" style={{ backgroundColor: cssRgb }} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-medium text-white leading-tight">{b.name}</span>
+          <div className="flex items-center gap-2 mt-1">
+            <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
+              <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, backgroundColor: cssRgb }} />
+            </div>
+            <span className="text-[10px] text-white/40 flex-none">{rentBHK ?? "blended"}</span>
+          </div>
+        </span>
+        <span className="font-display text-sm font-bold flex-none" style={{ color: cssRgb }}>
+          {formatRent(rent)}
+        </span>
+      </motion.button>
+    );
+  }
+
+  if (viewMode === 'aqi') {
+    const rgb = aqiColor(b.aqi);
+    const cssRgb = `rgb(${rgb.join(",")})`;
+    return (
+      <motion.button
+        key={b.id}
+        initial={{ opacity: 0, x: -10 }}
+        animate={{ opacity: 1, x: 0 }}
+        transition={{ duration: 0.25, ease: EASE, delay: Math.min(index * 0.02, 0.35) }}
+        onClick={() => onSelect(b)}
+        className="flex w-full items-center gap-2.5 rounded-xl bg-white/[0.04] px-2.5 py-2 text-left transition hover:bg-white/[0.09] active:scale-[0.99]"
+      >
+        <span className="h-7 w-1 flex-none rounded-full" style={{ backgroundColor: cssRgb }} />
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-xs font-medium text-white leading-tight">{b.name}</span>
+          <div className="flex items-center gap-2 mt-1">
+            <div className="flex-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
+              <div className="h-full rounded-full transition-all duration-500" style={{ width: `${Math.min(100, (b.aqi / 300) * 100)}%`, backgroundColor: cssRgb }} />
+            </div>
+            <span className="text-[10px] text-white/40 flex-none">{b.pm25.toFixed(0)} µg/m³</span>
+          </div>
+        </span>
+        <span className="font-display text-sm font-bold flex-none" style={{ color: cssRgb }}>
+          {Math.round(b.aqi)}
+        </span>
+      </motion.button>
+    );
+  }
+
   if (viewMode === 'ac') {
     const acScore = getACScore(b, floorLevel);
     const rgb = acColor(acScore);
@@ -482,8 +594,41 @@ function BlockAIIntervention({ b, floorLevel }: { b: Block; floorLevel: FloorLev
   );
 }
 
-export default function Sidebar({ blocks, selected, onSelect, onFlyTo, viewMode, floorLevel, onFloorLevelChange, weather, userLocation, onUserLocationChange }: Props) {
+export default function Sidebar({
+  blocks,
+  selected,
+  onSelect,
+  onFlyTo,
+  viewMode,
+  floorLevel,
+  onFloorLevelChange,
+  weather,
+  userLocation,
+  onUserLocationChange,
+  rentBudget,
+  onRentBudgetChange,
+  rentBHK,
+  onRentBHKChange,
+}: Props) {
   const [blockSearch, setBlockSearch] = useState("");
+  const isSearching = blockSearch.trim() !== "";
+
+  // Areas render collapsed by default — only mount their blocks when expanded,
+  // which keeps the list to ~19 rows at rest instead of ~1800+.
+  const [expandedAreas, setExpandedAreas] = useState<Set<string>>(new Set());
+  const toggleArea = useCallback((area: string) => {
+    setExpandedAreas((prev) => {
+      const next = new Set(prev);
+      if (next.has(area)) next.delete(area);
+      else next.add(area);
+      return next;
+    });
+  }, []);
+
+  const areaMatchesRent = useCallback(
+    (area: string) => areaMatchesRentFilter(area, rentBudget, rentBHK),
+    [rentBudget, rentBHK],
+  );
 
   // ── All blocks grouped by area, sorted by heat ───────────────────────────
   const groupedBlocks = useMemo(() => {
@@ -493,14 +638,24 @@ export default function Sidebar({ blocks, selected, onSelect, onFlyTo, viewMode,
           (b) => b.name.toLowerCase().includes(q) || b.area.toLowerCase().includes(q),
         )
       : blocks;
-    const sorted = [...filtered].sort((a, b) => b.lst - a.lst);
+    const rank = (b: Block) =>
+      viewMode === 'aqi'
+        ? b.aqi
+        : viewMode === 'ac'
+          ? getACScore(b, floorLevel)
+          : viewMode === 'rent'
+            ? (areaRentForMode(b.area, rentBHK) ?? 0)
+            : b.lst;
+    const sorted = [...filtered].sort((a, b) => rank(b) - rank(a));
     const map = new Map<string, Block[]>();
     for (const b of sorted) {
       if (!map.has(b.area)) map.set(b.area, []);
       map.get(b.area)!.push(b);
     }
-    return [...map.entries()].sort((a, b) => b[1][0].lst - a[1][0].lst);
-  }, [blocks, blockSearch]);
+    return [...map.entries()]
+      .filter(([area]) => areaMatchesRent(area))
+      .sort((a, b) => rank(b[1][0]) - rank(a[1][0]));
+  }, [blocks, blockSearch, viewMode, floorLevel, rentBHK, areaMatchesRent]);
 
   const totalShown = useMemo(
     () => groupedBlocks.reduce((s, [, bs]) => s + bs.length, 0),
@@ -519,7 +674,7 @@ export default function Sidebar({ blocks, selected, onSelect, onFlyTo, viewMode,
   const [rationaleLoading, setRationaleLoading] = useState(false);
 
   useEffect(() => {
-    if (!selected || viewMode === 'temp') {
+    if (!selected || viewMode !== 'ac') {
       setRationale(null);
       return;
     }
@@ -575,12 +730,53 @@ export default function Sidebar({ blocks, selected, onSelect, onFlyTo, viewMode,
     };
   }, [selected?.id, viewMode, floorLevel, weather.temperature, weather.humidity, weather.apparentTemp, weather.windSpeed]);
 
+  // ── Mobile draggable sheet: peek / half / full snap points (vh) ───────────
+  const SNAP_POINTS = [13, 58, 92];
+  const [isMobile, setIsMobile] = useState(false);
+  const [sheetVh, setSheetVh] = useState(SNAP_POINTS[1]);
+  const [isDragging, setIsDragging] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 767px)");
+    setIsMobile(mq.matches);
+    const onChange = (e: MediaQueryListEvent) => setIsMobile(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+
+  // Auto-expand from peek when a block is opened so detail isn't hidden
+  useEffect(() => {
+    if (selected && sheetVh < SNAP_POINTS[1]) setSheetVh(SNAP_POINTS[1]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected?.id]);
+
+  const handlePanStart = useCallback(() => {
+    setIsDragging(true);
+  }, []);
+
+  const handlePan = useCallback((_: unknown, info: PanInfo) => {
+    setSheetVh((v) => Math.min(94, Math.max(10, v - (info.delta.y / window.innerHeight) * 100)));
+  }, []);
+
+  const handlePanEnd = useCallback((_: unknown, info: PanInfo) => {
+    setIsDragging(false);
+    setSheetVh((v) => {
+      let nearest = SNAP_POINTS[0];
+      for (const p of SNAP_POINTS) if (Math.abs(p - v) < Math.abs(nearest - v)) nearest = p;
+      let idx = SNAP_POINTS.indexOf(nearest);
+      if (info.velocity.y < -650 && idx < SNAP_POINTS.length - 1) idx += 1;
+      else if (info.velocity.y > 650 && idx > 0) idx -= 1;
+      return SNAP_POINTS[idx];
+    });
+  }, []);
+
   return (
     <motion.aside
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       transition={{ duration: 0.4 }}
-      className="pointer-events-auto fixed left-0 right-0 bottom-0 md:top-0 md:right-auto md:w-[320px] z-20 flex flex-col h-[42dvh] md:h-screen transition-all duration-300"
+      style={isMobile ? { height: `${sheetVh}dvh`, transition: isDragging ? "none" : "height 0.4s cubic-bezier(0.22,1,0.36,1)" } : undefined}
+      className="pointer-events-auto fixed left-0 right-0 bottom-0 md:top-0 md:right-auto md:w-[320px] z-20 flex flex-col h-[58dvh] md:h-screen"
     >
       {/* Glass panel */}
       <div
@@ -592,16 +788,28 @@ export default function Sidebar({ blocks, selected, onSelect, onFlyTo, viewMode,
           boxShadow: "0 -4px 32px rgba(0,0,0,0.4), 4px 0 32px rgba(0,0,0,0.55)",
         }}
       >
+        {/* Drag handle — mobile only, grab anywhere on this row to resize */}
+        <motion.div
+          onPanStart={handlePanStart}
+          onPan={handlePan}
+          onPanEnd={handlePanEnd}
+          className="md:hidden flex-none flex justify-center pt-2.5 pb-1.5 cursor-grab active:cursor-grabbing touch-none"
+        >
+          <span className="h-1.5 w-10 rounded-full bg-white/25" />
+        </motion.div>
+
         {/* ── Header ─────────────────────────────────────────────────────── */}
-        <div className="flex-none px-4 pt-5 pb-3">
+        <div className="flex-none px-4 pt-1 pb-2 md:pt-5 md:pb-3">
           <h1 className="font-display text-sm font-bold tracking-wide text-white">
             CHHAON{" "}
             <span className="font-normal text-white/35">छांव</span>
           </h1>
-          <p className="text-[11px] text-white/40 mt-0.5">Gurugram heat twin</p>
+          <p className="hidden md:block text-[11px] text-white/40 mt-0.5">
+            The biggest, most unorganized dataset — visualized for God&apos;s favorite city, Gurugram
+          </p>
 
           {/* Search — both geocoding + block filter */}
-          <div className="mt-3">
+          <div className="mt-2 md:mt-3">
             <MapSearch
               onFlyTo={onFlyTo}
               blockSearch={blockSearch}
@@ -613,8 +821,43 @@ export default function Sidebar({ blocks, selected, onSelect, onFlyTo, viewMode,
             />
           </div>
 
+          {/* Master rent filter — optional budget + BHK requirement */}
+          <div className="mt-2 md:mt-3">
+            <div className="text-[10px] font-bold text-white/40 tracking-wider uppercase mb-1.5 px-0.5">
+              💰 Rent filter <span className="normal-case font-normal text-white/25">(optional)</span>
+            </div>
+            <div className="flex gap-1.5">
+              <input
+                type="number"
+                inputMode="numeric"
+                min={0}
+                value={rentBudget}
+                onChange={(e) => onRentBudgetChange(e.target.value)}
+                placeholder="Max ₹/mo"
+                className="w-24 min-w-0 flex-none rounded-lg border border-white/5 bg-black/40 px-2.5 py-1.5 text-xs text-white outline-none placeholder:text-white/30 focus:border-white/20"
+                aria-label="Maximum monthly rent budget"
+              />
+              <div className="grid flex-1 grid-cols-4 gap-1 rounded-lg border border-white/5 bg-black/40 p-0.5">
+                {(["Any", ...RENT_BHK_OPTIONS] as const).map((opt) => {
+                  const active = opt === "Any" ? rentBHK === null : rentBHK === opt;
+                  return (
+                    <button
+                      key={opt}
+                      onClick={() => onRentBHKChange(opt === "Any" ? null : (opt as BHKConfig))}
+                      className={`rounded-md px-1 py-1 text-[9px] font-bold tracking-wide uppercase transition-all ${
+                        active ? "bg-white/10 text-white shadow border border-white/10" : "text-white/40 hover:text-white/70"
+                      }`}
+                    >
+                      {opt === "Any" ? "Any" : opt.replace(" BHK", "")}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
           {/* Floor level selector segment */}
-          <div className="mt-3">
+          <div className="mt-2 md:mt-3">
             <div className="text-[10px] font-bold text-white/40 tracking-wider uppercase mb-1.5 px-0.5">Floor Level</div>
             <div className="grid grid-cols-3 bg-black/40 rounded-xl p-0.5 border border-white/5">
               {(['1-2', '3-4', '5+'] as FloorLevel[]).map((f) => {
@@ -668,7 +911,7 @@ export default function Sidebar({ blocks, selected, onSelect, onFlyTo, viewMode,
                     </p>
                   </div>
                   <div className="flex items-center gap-1.5 flex-none">
-                    <HeatBadge score={selected.score} lst={selected.lst} viewMode={viewMode} b={selected} floorLevel={floorLevel} />
+                    <HeatBadge score={selected.score} lst={selected.lst} viewMode={viewMode} b={selected} floorLevel={floorLevel} rentBHK={rentBHK} />
                     <button
                       onClick={() => onSelect(null)}
                       className="rounded-full bg-white/10 p-1.5 text-white/50 hover:bg-white/20 hover:text-white transition"
@@ -689,8 +932,95 @@ export default function Sidebar({ blocks, selected, onSelect, onFlyTo, viewMode,
                   <Vital label="Canopy" value={`${Math.round(selected.canopy * 100)}%`} />
                 </div>
 
+                {/* Rent panel — real crowdsourced pins near this area, not a map layer */}
+                {areaHasRentData(selected.area) ? (
+                  (() => {
+                    const stats = areaRentStats(selected.area);
+                    const configs = (Object.keys(stats) as BHKConfig[]).sort(
+                      (a, b) => (stats[a]?.median ?? 0) - (stats[b]?.median ?? 0),
+                    );
+                    return (
+                      <div className="rounded-xl bg-white/[0.04] px-3 py-2.5 mb-3">
+                        <p className="text-[10px] uppercase tracking-wider text-white/35 mb-2">
+                          💰 Rent in {selected.area}{" "}
+                          <span className="normal-case text-white/25">(average, indicative — ± ₹5,000)</span>
+                        </p>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          {configs.map((c) => {
+                            const s = stats[c]!;
+                            const isFilterMatch = rentBHK === c;
+                            return (
+                              <div
+                                key={c}
+                                className={`rounded-lg px-2 py-1.5 border ${
+                                  isFilterMatch ? "border-emerald-400/40 bg-emerald-400/10" : "border-white/5 bg-white/[0.02]"
+                                }`}
+                              >
+                                <div className="text-[9px] uppercase tracking-wider text-white/40">{c}</div>
+                                <div className="text-sm font-bold text-white">
+                                  ₹{s.median.toLocaleString("en-IN")}
+                                  <span className="text-[9px] font-normal text-white/35"> /mo</span>
+                                </div>
+                                <div className="text-[9px] text-white/30">{s.n} listing{s.n !== 1 ? "s" : ""}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {(() => {
+                          const sample = areaSamplePins(selected.area, rentBHK ?? undefined, 2);
+                          return sample.length > 0 ? (
+                            <p className="mt-2 text-[10px] text-white/30">
+                              e.g. {sample.map((p) => p.society).join(", ")}
+                            </p>
+                          ) : null;
+                        })()}
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <div className="rounded-xl bg-white/[0.03] px-3 py-2.5 mb-3 text-[10.5px] text-white/40">
+                    💰 No rent submissions near {selected.area} yet.
+                  </div>
+                )}
+
+                {/* AQI panel: local PM2.5/AQI reading + dominant contributor */}
+                {viewMode === 'aqi' && (() => {
+                  const rgb = aqiColor(selected.aqi);
+                  const cssRgb = `rgb(${rgb.join(",")})`;
+                  const trafficShare = selected.traffic * 0.9 + selected.density * 0.35;
+                  const vegShare = selected.ndvi * 0.28 + selected.canopy * 0.15;
+                  const dominant = trafficShare > vegShare * 1.3 ? "traffic & built density" : "mixed sources";
+                  return (
+                    <div
+                      className="rounded-xl p-3 mb-3 text-[10.5px] leading-relaxed"
+                      style={{ background: `rgba(${rgb.join(",")},0.08)`, border: `1px solid rgba(${rgb.join(",")},0.2)` }}
+                    >
+                      <div className="font-semibold mb-1.5 flex items-center justify-between text-xs" style={{ color: cssRgb }}>
+                        <span className="flex items-center gap-1.5 font-display tracking-wide uppercase text-[10px]">
+                          <span>💨</span> Air Quality
+                        </span>
+                        <span className="font-bold">{aqiCategory(selected.aqi)}</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div className="rounded-lg bg-white/[0.02] p-2 border border-white/5">
+                          <span className="text-[8.5px] uppercase tracking-wider text-white/35 block mb-0.5">PM2.5</span>
+                          <span className="text-sm font-bold text-white">{selected.pm25.toFixed(1)} µg/m³</span>
+                        </div>
+                        <div className="rounded-lg bg-white/[0.02] p-2 border border-white/5">
+                          <span className="text-[8.5px] uppercase tracking-wider text-white/35 block mb-0.5">US AQI</span>
+                          <span className="text-sm font-bold" style={{ color: cssRgb }}>{Math.round(selected.aqi)}</span>
+                        </div>
+                      </div>
+                      <p className="text-white/70 mt-2">
+                        Dominant local driver: <span className="text-white/90 font-medium">{dominant}</span>. Tree canopy and
+                        vegetation lightly scrub particulates here, but do far less for PM2.5 than for surface heat.
+                      </p>
+                    </div>
+                  );
+                })()}
+
                 {/* Micro-explanation for AC recommendation logic (AI Generated) */}
-                {viewMode !== 'temp' && (() => {
+                {viewMode === 'ac' && (() => {
                   const setpoint = getAC(selected, floorLevel);
                   // Dynamic savings: 6% per degree saved vs 22°C baseline
                   const pctSaved = (setpoint - 22) * 6;
@@ -836,52 +1166,106 @@ export default function Sidebar({ blocks, selected, onSelect, onFlyTo, viewMode,
                 </div>
 
                 {/* List Legend Info */}
-                {viewMode !== 'temp' && (
+                {viewMode === 'ac' && (
                   <div className="rounded-lg bg-white/[0.03] border border-white/[0.05] px-2.5 py-1.5 mb-3 text-[10px] text-white/50 leading-normal">
                     🟢 Green = Eco Setpoint (24-25°C) · 🔴 Red = High Stress Setpoint (26-27°C)
+                  </div>
+                )}
+                {viewMode === 'aqi' && (
+                  <div className="rounded-lg bg-white/[0.03] border border-white/[0.05] px-2.5 py-1.5 mb-3 text-[10px] text-white/50 leading-normal">
+                    🟢 Good · 🟡 Moderate · 🟠 Unhealthy (Sensitive) · 🔴 Unhealthy · 🟣 Very Unhealthy
+                  </div>
+                )}
+                {viewMode === 'rent' && (
+                  <div className="rounded-lg bg-white/[0.03] border border-white/[0.05] px-2.5 py-1.5 mb-3 text-[10px] text-white/50 leading-normal">
+                    🟢 ≤ ₹20k · 🟡 ~₹40k · 🔴 ≥ ₹80k — {rentBHK ?? "blended across configs"}
                   </div>
                 )}
 
                 {groupedBlocks.length === 0 ? (
                   <p className="py-10 text-center text-sm text-white/35">
-                    No blocks match &ldquo;{blockSearch}&rdquo;
+                    {blockSearch
+                      ? <>No blocks match &ldquo;{blockSearch}&rdquo;</>
+                      : "No areas match this rent filter"}
                   </p>
                 ) : (
-                  <div className="space-y-4">
-                    {groupedBlocks.map(([area, areaBlocks], gi) => {
-                      const areaScore = areaBlocks[0].score;
-                      const ac = heatColor(areaScore);
-                      const baseIndex = groupedBlocks
-                        .slice(0, gi)
-                        .reduce((s, [, bs]) => s + bs.length, 0);
+                  <div className="space-y-2">
+                    {groupedBlocks.map(([area, areaBlocks]) => {
+                      const top = areaBlocks[0];
+                      const areaRent = areaRentForMode(area, rentBHK);
+                      const ac =
+                        viewMode === 'aqi'
+                          ? aqiColor(top.aqi)
+                          : viewMode === 'ac'
+                            ? acColor(getACScore(top, floorLevel))
+                            : viewMode === 'rent'
+                              ? rentColor(areaRent ?? 40000)
+                              : heatColor(top.score);
+                      const cssRgb = `rgb(${ac.join(",")})`;
+                      const topLabel =
+                        viewMode === 'aqi'
+                          ? `${Math.round(top.aqi)}`
+                          : viewMode === 'ac'
+                            ? `${getAC(top, floorLevel)}°C`
+                            : viewMode === 'rent'
+                              ? `${formatRent(areaRent ?? 40000)}/mo`
+                              : `${top.lst.toFixed(1)}°`;
+                      const expanded = isSearching || expandedAreas.has(area);
 
                       return (
                         <div key={area}>
-                          {/* Area heading */}
-                          <div className="mb-1.5 flex items-center gap-2 sticky top-0 py-0.5">
-                            <span
-                              className="h-2 w-2 rounded-full flex-none"
-                              style={{ background: `rgb(${ac.join(",")})` }}
-                            />
+                          {/* Area heading — collapsed by default, tap to expand its blocks */}
+                          <button
+                            onClick={() => toggleArea(area)}
+                            className="flex w-full items-center gap-2 rounded-lg py-1.5 px-0.5 transition hover:bg-white/[0.04]"
+                          >
+                            <span className="h-2 w-2 rounded-full flex-none" style={{ background: cssRgb }} />
                             <span className="text-[10px] font-bold uppercase tracking-widest text-white/55">
                               {area}
                             </span>
-                            <span className="text-[10px] text-white/25 ml-auto">
-                              {areaBlocks.length}
+                            <span className="ml-auto flex items-center gap-2">
+                              <span className="font-display text-xs font-bold" style={{ color: cssRgb }}>
+                                {topLabel}
+                              </span>
+                              <span className="text-[10px] text-white/25">{areaBlocks.length}</span>
+                              <motion.svg
+                                animate={{ rotate: expanded ? 180 : 0 }}
+                                transition={{ duration: 0.25, ease: EASE }}
+                                width="10"
+                                height="10"
+                                viewBox="0 0 10 10"
+                                fill="none"
+                                className="text-white/35"
+                              >
+                                <path d="M1.5 3.5L5 7l3.5-3.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                              </motion.svg>
                             </span>
-                          </div>
-                          <div className="space-y-1">
-                            {areaBlocks.map((b, i) => (
-                              <BlockRow
-                                key={b.id}
-                                b={b}
-                                index={baseIndex + i}
-                                onSelect={onSelect}
-                                viewMode={viewMode}
-                                floorLevel={floorLevel}
-                              />
-                            ))}
-                          </div>
+                          </button>
+                          <AnimatePresence initial={false}>
+                            {expanded && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: "auto", opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.25, ease: EASE }}
+                                className="overflow-hidden"
+                              >
+                                <div className="space-y-1 pb-1 pt-1">
+                                  {areaBlocks.map((b, i) => (
+                                    <BlockRow
+                                      key={b.id}
+                                      b={b}
+                                      index={i}
+                                      onSelect={onSelect}
+                                      viewMode={viewMode}
+                                      floorLevel={floorLevel}
+                                      rentBHK={rentBHK}
+                                    />
+                                  ))}
+                                </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
                       );
                     })}

@@ -2,7 +2,7 @@
 
 import { AnimatePresence, motion } from "framer-motion";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Block, priorityBlocks } from "@/lib/model";
+import { Block, priorityBlocks, Weather } from "@/lib/model";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -191,13 +191,7 @@ export default function AskTwin({
   blocks: Block[];
   selected: Block | null;
   seed: Msg[] | null;
-  weather: {
-    temperature: number;
-    humidity: number;
-    apparentTemp: number;
-    windSpeed: number;
-    weatherCode: number;
-  };
+  weather: Weather;
 }) {
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -211,7 +205,7 @@ export default function AskTwin({
     setError(null);
     setBusy(true);
     try {
-      const weatherContext = `Live Gurugram City Weather: Air Temperature ${weather.temperature.toFixed(1)}°C, Apparent Feels-Like ${weather.apparentTemp.toFixed(1)}°C, Relative Humidity ${weather.humidity}%, Wind Speed ${weather.windSpeed} km/h.`;
+      const weatherContext = `Live Gurugram City Weather: Air Temperature ${weather.temperature.toFixed(1)}°C, Apparent Feels-Like ${weather.apparentTemp.toFixed(1)}°C, Relative Humidity ${weather.humidity}%, Wind Speed ${weather.windSpeed} km/h. Air Quality: PM2.5 ${weather.pm25.toFixed(1)} µg/m³, US AQI ${Math.round(weather.aqi)}.`;
       const context = `${cityContext(blocks)}\n\n${weatherContext}\n\n${selected ? `User is inspecting:\n${blockContext(selected)}` : ""}`;
       const reply = await askGroq(next, context);
       setMsgs([...next, { role: "assistant", content: reply }]);

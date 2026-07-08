@@ -6,7 +6,8 @@ import { PolygonLayer, ScatterplotLayer } from "@deck.gl/layers";
 import { FlyToInterpolator, type MapViewState, type PickingInfo } from "@deck.gl/core";
 import { Map } from "react-map-gl/maplibre";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { Block, heatColor, acColor, scoreFromLST, getACScore, FloorLevel } from "@/lib/model";
+import { Block, heatColor, acColor, aqiColor, scoreFromLST, getACScore, FloorLevel, ViewMode } from "@/lib/model";
+import { BHKConfig, areaRentForMode, rentColor, areaMatchesRentFilter } from "@/lib/rentData";
 import type { FlyTarget } from "./BottomSheet";
 
 // Dark basemap WITH labels so streets and locality names are visible
@@ -29,10 +30,12 @@ type Props = {
   selectedId: string | null;
   onSelect: (block: Block | null) => void;
   flyToTarget: FlyTarget | null;
-  viewMode: 'temp' | 'ac';
+  viewMode: ViewMode;
   floorLevel: FloorLevel;
   userLocation: { longitude: number; latitude: number } | null;
   onUserLocationChange: (loc: { longitude: number; latitude: number } | null) => void;
+  rentBudget: string;
+  rentBHK: BHKConfig | null;
 };
 
 export default function MapView({
@@ -44,6 +47,8 @@ export default function MapView({
   floorLevel,
   userLocation,
   onUserLocationChange,
+  rentBudget,
+  rentBHK,
 }: Props) {
   const [viewState, setViewState] = useState<MapViewState>(INITIAL_VIEW);
   const [hovered, setHovered] = useState<string | null>(null);
@@ -116,11 +121,17 @@ export default function MapView({
         getPolygon: (b) => b.polygon,
         extruded: false,
         getFillColor: (b) => {
-          let score = scoreFromLST(b.lst);
-          if (viewMode === 'ac') score = getACScore(b, floorLevel);
-          
-          const c = viewMode === 'ac' ? acColor(score) : heatColor(score);
-          const alpha =
+          let c: [number, number, number];
+          if (viewMode === 'ac') {
+            c = acColor(getACScore(b, floorLevel));
+          } else if (viewMode === 'aqi') {
+            c = aqiColor(b.aqi);
+          } else if (viewMode === 'rent') {
+            c = rentColor(areaRentForMode(b.area, rentBHK) ?? 40000);
+          } else {
+            c = heatColor(scoreFromLST(b.lst));
+          }
+          let alpha =
             selectedId
               ? b.id === selectedId
                 ? 230
@@ -130,18 +141,34 @@ export default function MapView({
               : b.id === hovered
                 ? 190
                 : 150;
+          // Dim areas that don't match the rent filter so matches pop, in any view mode
+          const rentFilterActive = rentBudget.trim() !== "" || rentBHK !== null;
+          if (rentFilterActive && !areaMatchesRentFilter(b.area, rentBudget, rentBHK)) {
+            alpha = Math.round(alpha * 0.3);
+          }
           return [c[0], c[1], c[2], alpha];
         },
-        getLineColor: (b) =>
-          b.id === selectedId ? [255, 255, 255, 240] : [255, 255, 255, 45],
-        getLineWidth: (b) => (b.id === selectedId ? 28 : 6),
+        getLineColor: (b) => {
+          if (b.id === selectedId) return [255, 255, 255, 240];
+          const rentFilterActive = rentBudget.trim() !== "" || rentBHK !== null;
+          if (rentFilterActive && areaMatchesRentFilter(b.area, rentBudget, rentBHK)) {
+            return [250, 204, 21, 220]; // gold glow on matching areas
+          }
+          return [255, 255, 255, 45];
+        },
+        getLineWidth: (b) => {
+          if (b.id === selectedId) return 28;
+          const rentFilterActive = rentBudget.trim() !== "" || rentBHK !== null;
+          if (rentFilterActive && areaMatchesRentFilter(b.area, rentBudget, rentBHK)) return 14;
+          return 6;
+        },
         lineWidthUnits: "meters",
         stroked: true,
         pickable: true,
         updateTriggers: {
-          getFillColor: [selectedId, hovered, viewMode, floorLevel],
-          getLineColor: [selectedId],
-          getLineWidth: [selectedId],
+          getFillColor: [selectedId, hovered, viewMode, floorLevel, rentBudget, rentBHK],
+          getLineColor: [selectedId, rentBudget, rentBHK],
+          getLineWidth: [selectedId, rentBudget, rentBHK],
         },
         transitions: {
           getFillColor: { duration: 250, easing: easeOutQuint },
@@ -149,7 +176,7 @@ export default function MapView({
         onHover: (info: PickingInfo<Block>) => setHovered(info.object?.id ?? null),
         onClick: (info: PickingInfo<Block>) => onSelect(info.object ?? null),
       }),
-    [blocks, selectedId, hovered, onSelect, viewMode, floorLevel],
+    [blocks, selectedId, hovered, onSelect, viewMode, floorLevel, rentBudget, rentBHK],
   );
 
   // ── User location dot (pulsing blue) ─────────────────────────────────────

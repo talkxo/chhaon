@@ -17,6 +17,8 @@ export type Block = {
   traffic: number; // anthropogenic heat proxy 0..1
   lst: number; // afternoon land-surface temp °C
   score: number; // heat-risk score 0..100
+  pm25: number; // estimated local PM2.5 µg/m³
+  aqi: number; // US EPA AQI 0..500 derived from pm25
 };
 
 export type Interventions = {
@@ -26,6 +28,18 @@ export type Interventions = {
 };
 
 export const NO_INTERVENTIONS: Interventions = { roof: 0, pave: 0, tree: 0 };
+
+export type Weather = {
+  temperature: number;
+  humidity: number;
+  apparentTemp: number;
+  windSpeed: number;
+  weatherCode: number;
+  pm25: number;
+  aqi: number;
+};
+
+export type ViewMode = "temp" | "ac" | "aqi" | "rent";
 
 // Approximate locality anchors with land-use profiles. Weights blend by
 // gaussian distance so profiles bleed into each other like a real city.
@@ -105,6 +119,38 @@ function computeLST(
   return cleanTemp + uhi + noise;
 }
 
+// Local PM2.5 estimate from the same land-use proxies that drive heat: dense,
+// traffic-heavy blocks trap particulates while vegetation lightly scrubs them.
+function computePM25(
+  b: Pick<Block, "density" | "ndvi" | "canopy" | "traffic">,
+  basePM25: number,
+  noise: number,
+) {
+  const multiplier = clamp(0.6 + 0.9 * b.traffic + 0.35 * b.density - 0.28 * b.ndvi - 0.15 * b.canopy, 0.35, 2.2);
+  return clamp(basePM25 * multiplier + noise, 3, 500);
+}
+
+// US EPA AQI breakpoints for 24-hr PM2.5 (µg/m³) — standard piecewise-linear formula.
+const PM25_BREAKPOINTS: [number, number, number, number][] = [
+  [0.0, 12.0, 0, 50],
+  [12.1, 35.4, 51, 100],
+  [35.5, 55.4, 101, 150],
+  [55.5, 150.4, 151, 200],
+  [150.5, 250.4, 201, 300],
+  [250.5, 350.4, 301, 400],
+  [350.5, 500.4, 401, 500],
+];
+
+export function pm25ToUSAQI(pm25: number): number {
+  const cp = clamp(pm25, 0, 500.4);
+  for (const [bpLo, bpHi, aqiLo, aqiHi] of PM25_BREAKPOINTS) {
+    if (cp <= bpHi) {
+      return Math.round(((aqiHi - aqiLo) / (bpHi - bpLo)) * (cp - bpLo) + aqiLo);
+    }
+  }
+  return 500;
+}
+
 export const scoreFromLST = (lst: number, baseTemp = 40.5) => {
   const cleanBase = typeof baseTemp === "number" && !isNaN(baseTemp) ? baseTemp : 40.5;
   const min = cleanBase - 7.5;
@@ -133,12 +179,15 @@ function hexPolygon(cx: number, cy: number): [number, number][] {
 let cachedBlocks: Block[] | null = null;
 let cachedBaseTemp: number | null = null;
 let cachedHumidity: number | null = null;
+let cachedPM25: number | null = null;
 
-export function generateBlocks(baseTemp = 40.5, humidity = 35): Block[] {
+export function generateBlocks(baseTemp = 40.5, humidity = 35, basePM25 = 45): Block[] {
   const cleanTemp = typeof baseTemp === "number" && !isNaN(baseTemp) ? baseTemp : 40.5;
   const cleanHum = typeof humidity === "number" && !isNaN(humidity) ? humidity : 35;
+  const cleanPM25 = typeof basePM25 === "number" && !isNaN(basePM25) ? basePM25 : 45;
 
-  if (cachedBlocks && cachedBaseTemp === cleanTemp && cachedHumidity === cleanHum) return cachedBlocks;
+  if (cachedBlocks && cachedBaseTemp === cleanTemp && cachedHumidity === cleanHum && cachedPM25 === cleanPM25)
+    return cachedBlocks;
   
   const blocks: Block[] = [];
   const dx = 1.5 * R_LNG;
@@ -182,6 +231,7 @@ export function generateBlocks(baseTemp = 40.5, humidity = 35): Block[] {
         traffic: clamp(mix(traffic, RURAL.traffic) + (rand() - 0.5) * 0.1, 0.02, 1),
       };
       const lst = clamp(computeLST(block, cleanTemp, cleanHum, (rand() - 0.5) * 1.2), cleanTemp - 8, cleanTemp + 8);
+      const pm25 = computePM25(block, cleanPM25, (rand() - 0.5) * 6);
 
       // Skip far-fringe hexes to give the city an organic footprint
       if (urban < 0.12 && rand() < 0.75) continue;
@@ -196,12 +246,15 @@ export function generateBlocks(baseTemp = 40.5, humidity = 35): Block[] {
         ...block,
         lst,
         score: scoreFromLST(lst, cleanTemp),
+        pm25,
+        aqi: pm25ToUSAQI(pm25),
       });
     }
   }
   cachedBlocks = blocks;
   cachedBaseTemp = cleanTemp;
   cachedHumidity = cleanHum;
+  cachedPM25 = cleanPM25;
   return blocks;
 }
 
@@ -298,6 +351,43 @@ export function acColor(score: number): [number, number, number] {
     }
   }
   return AC_STOPS[AC_STOPS.length - 1][1];
+}
+
+// US EPA AQI color scale — breakpoints at the real category boundaries (0-500).
+const AQI_STOPS: [number, [number, number, number]][] = [
+  [0, [0, 228, 0]], // Good
+  [50, [0, 228, 0]],
+  [100, [255, 255, 0]], // Moderate
+  [150, [255, 126, 0]], // Unhealthy for Sensitive Groups
+  [200, [255, 0, 0]], // Unhealthy
+  [300, [143, 63, 151]], // Very Unhealthy
+  [500, [126, 0, 35]], // Hazardous
+];
+
+export function aqiColor(aqi: number): [number, number, number] {
+  const v = clamp(aqi, 0, 500);
+  for (let i = 1; i < AQI_STOPS.length; i++) {
+    if (v <= AQI_STOPS[i][0]) {
+      const [v0, c0] = AQI_STOPS[i - 1];
+      const [v1, c1] = AQI_STOPS[i];
+      const f = v1 === v0 ? 1 : (v - v0) / (v1 - v0);
+      return [
+        Math.round(c0[0] + f * (c1[0] - c0[0])),
+        Math.round(c0[1] + f * (c1[1] - c0[1])),
+        Math.round(c0[2] + f * (c1[2] - c0[2])),
+      ];
+    }
+  }
+  return AQI_STOPS[AQI_STOPS.length - 1][1];
+}
+
+export function aqiCategory(aqi: number): string {
+  if (aqi <= 50) return "Good";
+  if (aqi <= 100) return "Moderate";
+  if (aqi <= 150) return "Unhealthy (Sensitive)";
+  if (aqi <= 200) return "Unhealthy";
+  if (aqi <= 300) return "Very Unhealthy";
+  return "Hazardous";
 }
 
 export function cityStats(blocks: Block[]) {

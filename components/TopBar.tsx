@@ -2,7 +2,7 @@
 
 import { motion, useSpring, useTransform } from "framer-motion";
 import { useEffect } from "react";
-import { Block, cityStats } from "@/lib/model";
+import { Block, cityStats, aqiColor, aqiCategory, Weather, ViewMode } from "@/lib/model";
 
 const EASE = [0.22, 1, 0.36, 1] as const;
 
@@ -23,19 +23,14 @@ export default function TopBar({
   onViewModeChange,
 }: {
   blocks: Block[];
-  weather: {
-    temperature: number;
-    humidity: number;
-    apparentTemp: number;
-    windSpeed: number;
-    weatherCode: number;
-  };
+  weather: Weather;
   onAsk: () => void;
-  viewMode: "temp" | "ac";
-  onViewModeChange: (m: "temp" | "ac") => void;
+  viewMode: ViewMode;
+  onViewModeChange: (m: ViewMode) => void;
 }) {
   const stats = cityStats(blocks);
-  
+  const aqiRgb = aqiColor(weather.aqi);
+
   return (
     <motion.header
       initial={{ y: -70, opacity: 0 }}
@@ -51,6 +46,18 @@ export default function TopBar({
             <span className="font-bold">LIVE: {weather.temperature.toFixed(0)}°</span>
             <span className="hidden sm:inline opacity-75">| Feels {weather.apparentTemp.toFixed(0)}°</span>
             <span className="hidden md:inline opacity-75">| 💧 {weather.humidity}%</span>
+          </div>
+          <div
+            className="hidden sm:flex items-center gap-1 px-1.5 py-0.5 rounded-lg border"
+            style={{
+              color: `rgb(${aqiRgb.join(",")})`,
+              background: `rgba(${aqiRgb.join(",")},0.12)`,
+              borderColor: `rgba(${aqiRgb.join(",")},0.3)`,
+            }}
+            title={aqiCategory(weather.aqi)}
+          >
+            <span className="font-bold">AQI {Math.round(weather.aqi)}</span>
+            <span className="hidden md:inline opacity-80">{aqiCategory(weather.aqi)}</span>
           </div>
           <span>
             AVG{" "}
@@ -90,6 +97,30 @@ export default function TopBar({
             }`}
           >
             <span>❄️ AC Target</span>
+          </button>
+
+          {/* AQI advisory button */}
+          <button
+            onClick={() => onViewModeChange("aqi")}
+            className={`px-2 py-1 md:px-2.5 md:py-1.5 rounded-xl text-[9px] md:text-[10px] font-bold tracking-wider uppercase transition-all duration-300 border flex items-center gap-1 cursor-pointer ${
+              viewMode === "aqi"
+                ? "bg-white/10 text-white shadow border-white/10"
+                : "bg-black/25 text-white/45 hover:text-white/80 border-transparent"
+            }`}
+          >
+            <span>💨 AQI</span>
+          </button>
+
+          {/* Rent advisory button */}
+          <button
+            onClick={() => onViewModeChange("rent")}
+            className={`px-2 py-1 md:px-2.5 md:py-1.5 rounded-xl text-[9px] md:text-[10px] font-bold tracking-wider uppercase transition-all duration-300 border flex items-center gap-1 cursor-pointer ${
+              viewMode === "rent"
+                ? "bg-white/10 text-white shadow border-white/10"
+                : "bg-black/25 text-white/45 hover:text-white/80 border-transparent"
+            }`}
+          >
+            <span>💰 Rent</span>
           </button>
         </div>
 

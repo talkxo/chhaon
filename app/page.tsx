@@ -3,7 +3,8 @@
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Block, generateBlocks, FloorLevel } from "@/lib/model";
+import { Block, generateBlocks, FloorLevel, Weather, ViewMode } from "@/lib/model";
+import { BHKConfig } from "@/lib/rentData";
 import Sidebar, { type FlyTarget } from "@/components/BottomSheet";
 import TopBar from "@/components/TopBar";
 import AskTwin from "@/components/AskTwin";
@@ -26,16 +27,18 @@ const MapView = dynamic(() => import("@/components/MapView"), {
 type Msg = { role: "user" | "assistant"; content: string };
 
 export default function Home() {
-  const [weather, setWeather] = useState({
+  const [weather, setWeather] = useState<Weather>({
     temperature: 40.5,
     humidity: 35,
     apparentTemp: 43.5,
     windSpeed: 10,
     weatherCode: 0,
+    pm25: 45,
+    aqi: 116,
   });
   const [weatherLoading, setWeatherLoading] = useState(true);
 
-  // Fetch live weather baseline for Gurugram from our API
+  // Fetch live weather + air quality baseline for Gurugram from our API
   useEffect(() => {
     let active = true;
     fetch("/api/weather")
@@ -48,6 +51,8 @@ export default function Home() {
             apparentTemp: data.apparentTemp ?? data.temperature ?? 43.5,
             windSpeed: data.windSpeed ?? 10,
             weatherCode: data.weatherCode ?? 0,
+            pm25: data.pm25 ?? 45,
+            aqi: data.aqi ?? 116,
           });
         }
       })
@@ -60,7 +65,10 @@ export default function Home() {
     };
   }, []);
 
-  const blocks = useMemo(() => generateBlocks(weather.temperature, weather.humidity), [weather.temperature, weather.humidity]);
+  const blocks = useMemo(
+    () => generateBlocks(weather.temperature, weather.humidity, weather.pm25),
+    [weather.temperature, weather.humidity, weather.pm25],
+  );
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [askOpen, setAskOpen] = useState(false);
   const [seed, setSeed] = useState<Msg[] | null>(null);
@@ -68,9 +76,14 @@ export default function Home() {
   const [flyToTarget, setFlyToTarget] = useState<FlyTarget | null>(null);
 
   // View state layers and building floors filters
-  const [viewMode, setViewMode] = useState<"temp" | "ac">("temp");
+  const [viewMode, setViewMode] = useState<ViewMode>("temp");
   const [floorLevel, setFloorLevel] = useState<FloorLevel>("3-4");
   const [userLocation, setUserLocation] = useState<{ longitude: number; latitude: number } | null>(null);
+
+  // Master rent filter — shared by the sidebar (filters the area list) and the
+  // map (highlights matching areas + drives the "rent" color mode)
+  const [rentBudget, setRentBudget] = useState("");
+  const [rentBHK, setRentBHK] = useState<BHKConfig | null>(null);
 
   const selected = useMemo(
     () => blocks.find((b) => b.id === selectedId) ?? null,
@@ -99,6 +112,8 @@ export default function Home() {
         floorLevel={floorLevel}
         userLocation={userLocation}
         onUserLocationChange={setUserLocation}
+        rentBudget={rentBudget}
+        rentBHK={rentBHK}
       />
 
       {/* Sidebar — left panel, 320 px */}
@@ -113,6 +128,10 @@ export default function Home() {
         weather={weather}
         userLocation={userLocation}
         onUserLocationChange={setUserLocation}
+        rentBudget={rentBudget}
+        onRentBudgetChange={setRentBudget}
+        rentBHK={rentBHK}
+        onRentBHKChange={setRentBHK}
       />
 
       {/* TopBar — floats top-right, leaves sidebar gap */}
