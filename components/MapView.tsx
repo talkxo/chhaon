@@ -19,6 +19,11 @@ const INITIAL_VIEW: MapViewState = {
   zoom: 10.7,
   pitch: 0,     // flat overhead — fully browsable like a regular map
   bearing: 0,
+  // Chhaon is Gurugram-only — capping zoom-out keeps the national boundary
+  // (and the Kashmir/PoK border-rendering discrepancy between basemap
+  // providers) out of view entirely rather than trying to patch it.
+  minZoom: 9,
+  maxZoom: 18,
 };
 
 const easeOutQuint = (t: number) => 1 - Math.pow(1 - t, 5);
